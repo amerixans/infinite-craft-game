@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
     <title>Infinite Craft - Discover the Elements</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -13,9 +13,36 @@
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
+        
+        body {
+            touch-action: none;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+        }
+        
         .dark {
             color-scheme: dark;
         }
+        
+        .workspace-area {
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        .draggable-item {
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        .sidebar-scroll {
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-x pan-y;
+        }
+        
         @keyframes fadeIn {
             from { opacity: 0; transform: scale(0.9); }
             to { opacity: 1; transform: scale(1); }
@@ -23,12 +50,21 @@
         .animate-fadeIn {
             animation: fadeIn 0.3s ease-out;
         }
+        
         @keyframes slideUp {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
         }
         .animate-slideUp {
             animation: slideUp 0.4s ease-out;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-slow {
+            animation: pulse 2s ease-in-out infinite;
         }
     </style>
 </head>
@@ -54,13 +90,24 @@ const InfiniteCraft = () => {
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [showLookup, setShowLookup] = useState(false);
   const [lookupSearch, setLookupSearch] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [loadingItems, setLoadingItems] = useState(new Set());
+  const [isMobile, setIsMobile] = useState(false);
   const nextId = useRef(5);
+  const touchStartPos = useRef(null);
+  const dragClone = useRef(null);
   
   const [recipeCache, setRecipeCache] = useState({});
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     const savedApiKey = localStorage.getItem('infinitecraft_apikey');
@@ -122,51 +169,20 @@ const InfiniteCraft = () => {
     setIsTesting(true);
     
     try {
-      console.log('🧪 Testing API key...');
-      console.log('🔑 Key starts with:', apiKey.substring(0, 7) + '...');
-      
-      let response;
-      
-      if (proxyUrl) {
-        console.log('📡 Using proxy:', proxyUrl);
-        response = await fetch(`${proxyUrl}/api/test`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ apiKey })
-        });
-      } else {
-        console.log('📡 Attempting direct OpenAI call (may fail due to CORS)...');
-        response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'user',
-                content: 'Respond with just the word "success"'
-              }
-            ],
-            max_tokens: 10
-          })
-        });
-      }
-
-      console.log('📡 Response received, status:', response.status);
+      const response = await fetch(`${proxyUrl}/api/test`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ apiKey })
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ Error response body:', errorText);
         let errorMessage = 'API test failed';
         try {
           const errorJson = JSON.parse(errorText);
           errorMessage = errorJson.error?.message || errorMessage;
-          console.error('❌ Parsed error:', errorJson);
         } catch (e) {
           errorMessage = errorText;
         }
@@ -174,22 +190,13 @@ const InfiniteCraft = () => {
       }
 
       const data = await response.json();
-      console.log('✅ API test successful:', data);
       showNotification('✅ API Key is working!');
       setIsTesting(false);
     } catch (error) {
-      console.error('💥 Full error object:', error);
-      console.error('💥 Error name:', error.name);
-      console.error('💥 Error message:', error.message);
-      
       let userMessage = error.message;
       
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        userMessage = 'CORS Error: You need to deploy the proxy server. See console & README.';
-        console.error('');
-        console.error('🚨 CORS ISSUE DETECTED 🚨');
-        console.error('You need to set the Proxy URL in settings!');
-        console.error('');
+        userMessage = 'CORS Error: You need to deploy the proxy server.';
       }
       
       showNotification('❌ ' + userMessage);
@@ -205,8 +212,6 @@ const InfiniteCraft = () => {
     }
     
     try {
-      console.log('🔍 Calling AI for:', item1Name, '+', item2Name);
-      
       const response = await fetch(`${proxyUrl}/api/craft`, {
         method: 'POST',
         headers: {
@@ -219,11 +224,8 @@ const InfiniteCraft = () => {
         })
       });
 
-      console.log('📡 Response status:', response.status);
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ API Error Response:', errorText);
         let errorMessage = 'API call failed';
         try {
           const errorJson = JSON.parse(errorText);
@@ -235,7 +237,6 @@ const InfiniteCraft = () => {
       }
 
       const result = await response.json();
-      console.log('✅ Parsed result:', result);
       
       if (!result.name || !result.emoji) {
         throw new Error('Invalid response format - missing name or emoji');
@@ -243,11 +244,8 @@ const InfiniteCraft = () => {
       
       return result;
     } catch (error) {
-      console.error('💥 AI generation error:', error);
-      
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
         showNotification('❌ CORS Error - Set proxy URL in settings');
-        console.error('🚨 You need to set the proxy URL in settings!');
       } else {
         showNotification('❌ Error: ' + error.message);
       }
@@ -314,103 +312,10 @@ const InfiniteCraft = () => {
     setTimeout(() => setNotification(''), 3000);
   };
 
+  // Desktop drag handlers
   const handleDragStart = (e, item, source) => {
     setDraggedItem({ ...item, source });
     e.dataTransfer.effectAllowed = 'copy';
-    // Fix drag image visibility
-    if (e.dataTransfer.setDragImage) {
-      const dragImage = e.target.cloneNode(true);
-      dragImage.style.opacity = '0.8';
-      document.body.appendChild(dragImage);
-      e.dataTransfer.setDragImage(dragImage, dragImage.offsetWidth / 2, dragImage.offsetHeight / 2);
-      setTimeout(() => document.body.removeChild(dragImage), 0);
-    }
-  };
-
-  // Touch event handlers for mobile
-  const handleTouchStart = (e, item, source) => {
-    e.preventDefault();
-    setDraggedItem({ ...item, source });
-    
-    const touch = e.touches[0];
-    const element = e.currentTarget;
-    
-    // Create a floating copy
-    const clone = element.cloneNode(true);
-    clone.style.position = 'fixed';
-    clone.style.pointerEvents = 'none';
-    clone.style.opacity = '0.8';
-    clone.style.zIndex = '10000';
-    clone.id = 'touch-drag-clone';
-    clone.style.left = `${touch.clientX - element.offsetWidth / 2}px`;
-    clone.style.top = `${touch.clientY - element.offsetHeight / 2}px`;
-    document.body.appendChild(clone);
-  };
-
-  const handleTouchMove = (e) => {
-    if (!draggedItem) return;
-    e.preventDefault();
-    
-    const touch = e.touches[0];
-    const clone = document.getElementById('touch-drag-clone');
-    if (clone) {
-      clone.style.left = `${touch.clientX - clone.offsetWidth / 2}px`;
-      clone.style.top = `${touch.clientY - clone.offsetHeight / 2}px`;
-    }
-  };
-
-  const handleTouchEnd = async (e) => {
-    if (!draggedItem) return;
-    e.preventDefault();
-    
-    const clone = document.getElementById('touch-drag-clone');
-    if (clone) {
-      document.body.removeChild(clone);
-    }
-    
-    const touch = e.changedTouches[0];
-    const element = document.elementFromPoint(touch.clientX, touch.clientY);
-    
-    if (element) {
-      // Check if dropped on workspace
-      const workspace = document.querySelector('[data-workspace="true"]');
-      if (workspace && workspace.contains(element)) {
-        const workspaceRect = workspace.getBoundingClientRect();
-        const x = touch.clientX - workspaceRect.left;
-        const y = touch.clientY - workspaceRect.top;
-        
-        // Check if dropped on an item
-        const workspaceItem = element.closest('[data-workspace-item]');
-        if (workspaceItem) {
-          const targetId = workspaceItem.dataset.workspaceItem;
-          const targetItem = workspace.find(item => item.workspaceId == targetId);
-          if (targetItem) {
-            await handleDropOnElement({ preventDefault: () => {}, stopPropagation: () => {} }, targetItem);
-            setDraggedItem(null);
-            return;
-          }
-        }
-        
-        // Dropped on empty workspace
-        if (draggedItem.source === 'workspace') {
-          setWorkspace(prev => prev.map(item => 
-            item.workspaceId === draggedItem.workspaceId
-              ? { ...item, x, y }
-              : item
-          ));
-        } else {
-          const newItem = {
-            ...draggedItem,
-            workspaceId: Date.now() + Math.random(),
-            x,
-            y
-          };
-          setWorkspace(prev => [...prev, newItem]);
-        }
-      }
-    }
-    
-    setDraggedItem(null);
   };
 
   const handleDragOver = (e) => {
@@ -453,15 +358,11 @@ const InfiniteCraft = () => {
       setDraggedItem(null);
       return;
     }
-
-    console.log('🔄 Attempting to combine:', draggedItem.name, '+', targetItem.name);
     
-    // Add loading state to target item
     setLoadingItems(prev => new Set([...prev, targetItem.workspaceId]));
     
     const recipe = await findOrCreateRecipe(draggedItem, targetItem);
     
-    // Remove loading state
     setLoadingItems(prev => {
       const newSet = new Set(prev);
       newSet.delete(targetItem.workspaceId);
@@ -472,7 +373,6 @@ const InfiniteCraft = () => {
       const isNew = !discovered.some(d => d.name.toLowerCase() === recipe.name.toLowerCase());
       
       if (isNew) {
-        // Track discovery and get count
         trackDiscovery(recipe.name);
         const count = await getDiscoveryCount(recipe.name);
         
@@ -486,7 +386,6 @@ const InfiniteCraft = () => {
         setDiscovered(prev => [...prev, newElement]);
         showNotification(`✨ NEW! Discovered: ${recipe.emoji} ${recipe.name}`);
       } else {
-        // Update discovery count for existing item
         const count = await getDiscoveryCount(recipe.name);
         setDiscovered(prev => prev.map(item => 
           item.name.toLowerCase() === recipe.name.toLowerCase()
@@ -513,8 +412,98 @@ const InfiniteCraft = () => {
         return [...filtered, newItem];
       });
     } else {
-      console.error('❌ Recipe generation failed - no valid result');
-      showNotification('❌ Failed to create combination - check console for details');
+      showNotification('❌ Failed to create combination');
+    }
+    
+    setDraggedItem(null);
+  };
+
+  // Mobile touch handlers
+  const handleTouchStart = (e, item, source) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const touch = e.touches[0];
+    touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+    
+    setDraggedItem({ ...item, source });
+    
+    // Create visual clone
+    const element = e.currentTarget;
+    const clone = element.cloneNode(true);
+    clone.style.position = 'fixed';
+    clone.style.pointerEvents = 'none';
+    clone.style.opacity = '0.8';
+    clone.style.zIndex = '10000';
+    clone.style.left = `${touch.clientX - element.offsetWidth / 2}px`;
+    clone.style.top = `${touch.clientY - element.offsetHeight / 2}px`;
+    clone.id = 'touch-drag-clone';
+    document.body.appendChild(clone);
+    dragClone.current = clone;
+  };
+
+  const handleTouchMove = (e) => {
+    if (!draggedItem || !dragClone.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const touch = e.touches[0];
+    dragClone.current.style.left = `${touch.clientX - dragClone.current.offsetWidth / 2}px`;
+    dragClone.current.style.top = `${touch.clientY - dragClone.current.offsetHeight / 2}px`;
+  };
+
+  const handleTouchEnd = async (e) => {
+    if (!draggedItem) return;
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Remove clone
+    if (dragClone.current) {
+      document.body.removeChild(dragClone.current);
+      dragClone.current = null;
+    }
+    
+    const touch = e.changedTouches[0];
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+    
+    if (!element) {
+      setDraggedItem(null);
+      return;
+    }
+    
+    // Check if dropped on workspace item
+    const workspaceItem = element.closest('[data-workspace-item]');
+    if (workspaceItem) {
+      const targetId = workspaceItem.dataset.workspaceItem;
+      const targetItem = workspace.find(item => item.workspaceId == targetId);
+      if (targetItem && targetItem.workspaceId !== draggedItem.workspaceId) {
+        await handleDropOnElement({ preventDefault: () => {}, stopPropagation: () => {} }, targetItem);
+        return;
+      }
+    }
+    
+    // Check if dropped on workspace
+    const workspaceEl = document.querySelector('[data-workspace="true"]');
+    if (workspaceEl && (workspaceEl === element || workspaceEl.contains(element))) {
+      const workspaceRect = workspaceEl.getBoundingClientRect();
+      const x = touch.clientX - workspaceRect.left;
+      const y = touch.clientY - workspaceRect.top;
+      
+      if (draggedItem.source === 'workspace') {
+        setWorkspace(prev => prev.map(item => 
+          item.workspaceId === draggedItem.workspaceId
+            ? { ...item, x, y }
+            : item
+        ));
+      } else {
+        const newItem = {
+          ...draggedItem,
+          workspaceId: Date.now() + Math.random(),
+          x,
+          y
+        };
+        setWorkspace(prev => [...prev, newItem]);
+      }
     }
     
     setDraggedItem(null);
@@ -608,12 +597,12 @@ const InfiniteCraft = () => {
     <div className={`w-full h-screen flex flex-col transition-colors duration-300 ${darkMode ? 'dark bg-gray-900' : 'bg-gradient-to-br from-blue-50 to-purple-50'}`}>
       {/* API Key Modal */}
       {showApiKeyInput && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
-          <div className={`rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl animate-slideUp ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <h3 className={`text-2xl font-bold mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn p-4">
+          <div className={`rounded-2xl p-6 max-w-md w-full shadow-2xl animate-slideUp ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+            <h3 className={`text-xl font-bold mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
               API Key Required
             </h3>
-            <p className={`text-sm mb-6 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            <p className={`text-xs mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
               Enter your OpenAI API key to start crafting
             </p>
             
@@ -622,33 +611,33 @@ const InfiniteCraft = () => {
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk-..."
-              className={`w-full px-4 py-3 border rounded-xl mb-4 focus:outline-none focus:ring-2 transition-all ${
+              className={`w-full px-3 py-2 text-sm border rounded-xl mb-3 focus:outline-none focus:ring-2 transition-all ${
                 darkMode 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500' 
                   : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
               }`}
             />
             
-            <div className="flex gap-3 mb-4">
+            <div className="flex gap-2 mb-3">
               <button
                 onClick={testApiKey}
                 disabled={isTesting}
-                className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${
+                className={`flex-1 px-3 py-2 text-sm rounded-xl font-medium transition-all ${
                   isTesting 
                     ? 'bg-gray-400 cursor-not-allowed' 
                     : darkMode
                       ? 'bg-green-600 hover:bg-green-700 text-white'
-                      : 'bg-green-500 hover:bg-green-600 text-white shadow-lg shadow-green-500/30 hover:shadow-green-600/40'
+                      : 'bg-green-500 hover:bg-green-600 text-white'
                 }`}
               >
                 {isTesting ? 'Testing...' : '🧪 Test'}
               </button>
               <button
                 onClick={saveApiKey}
-                className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${
+                className={`flex-1 px-3 py-2 text-sm rounded-xl font-medium transition-all ${
                   darkMode
                     ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                    : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/30 hover:shadow-blue-600/40'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white'
                 }`}
               >
                 💾 Save
@@ -656,7 +645,7 @@ const InfiniteCraft = () => {
             </div>
             <button
               onClick={() => setShowApiKeyInput(false)}
-              className={`w-full px-4 py-3 rounded-xl font-medium transition-all ${
+              className={`w-full px-3 py-2 text-sm rounded-xl font-medium transition-all ${
                 darkMode
                   ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                   : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
@@ -664,8 +653,8 @@ const InfiniteCraft = () => {
             >
               Cancel
             </button>
-            <p className={`text-xs mt-4 text-center ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-              Get your key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className={`${darkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500 hover:text-blue-600'} transition-colors`}>platform.openai.com</a>
+            <p className={`text-xs mt-3 text-center ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+              Get your key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className={`${darkMode ? 'text-blue-400' : 'text-blue-500'}`}>platform.openai.com</a>
             </p>
           </div>
         </div>
@@ -673,15 +662,15 @@ const InfiniteCraft = () => {
 
       {/* Lookup Modal */}
       {showLookup && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
-          <div className={`rounded-2xl p-8 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto shadow-2xl animate-slideUp ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn p-4">
+          <div className={`rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-slideUp ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                 🔍 Recipe Lookup
               </h3>
               <button
                 onClick={() => setShowLookup(false)}
-                className={`px-4 py-2 rounded-xl font-medium transition-all ${
+                className={`px-3 py-2 text-sm rounded-xl font-medium transition-all ${
                   darkMode
                     ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                     : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
@@ -696,48 +685,48 @@ const InfiniteCraft = () => {
               value={lookupSearch}
               onChange={(e) => setLookupSearch(e.target.value)}
               placeholder="Search for an element..."
-              className={`w-full px-4 py-3 border rounded-xl mb-6 focus:outline-none focus:ring-2 transition-all ${
+              className={`w-full px-3 py-2 text-sm border rounded-xl mb-4 focus:outline-none focus:ring-2 transition-all ${
                 darkMode 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500' 
                   : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
               }`}
             />
             
-            <div className="space-y-3">
+            <div className="space-y-2">
               {filteredDiscoveries.map((item) => (
                 <div
                   key={item.id}
-                  className={`p-4 rounded-xl ${
+                  className={`p-3 rounded-xl ${
                     darkMode
                       ? 'bg-gray-700'
                       : 'bg-gradient-to-r from-blue-50 to-purple-50'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-3xl">{item.emoji}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">{item.emoji}</span>
                       <div>
-                        <p className={`font-bold text-lg ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                        <p className={`font-bold text-sm ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                           {item.name}
                         </p>
                         {item.recipe ? (
-                          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                          <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                             {item.recipe.item1} + {item.recipe.item2}
                           </p>
                         ) : (
-                          <p className={`text-sm ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                          <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
                             Starting element
                           </p>
                         )}
                       </div>
                     </div>
                     {item.discoveryCount > 0 && (
-                      <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                      <div className={`px-2 py-1 rounded-full text-xs font-bold ${
                         darkMode
                           ? 'bg-purple-600 text-white'
                           : 'bg-purple-500 text-white'
                       }`}>
-                        {item.discoveryCount} {item.discoveryCount === 1 ? 'discovery' : 'discoveries'}
+                        {item.discoveryCount}
                       </div>
                     )}
                   </div>
@@ -745,7 +734,7 @@ const InfiniteCraft = () => {
               ))}
               
               {filteredDiscoveries.length === 0 && (
-                <p className={`text-center py-8 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                <p className={`text-center py-8 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                   No elements found
                 </p>
               )}
@@ -756,56 +745,55 @@ const InfiniteCraft = () => {
 
       {/* Header */}
       <div className={`shadow-lg transition-colors duration-300 ${darkMode ? 'bg-gray-800 shadow-gray-900/50' : 'bg-white'}`}>
-        <div className="p-4 md:p-6">
+        <div className="p-3">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className={`text-3xl md:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r ${
+              <h1 className={`text-xl md:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r ${
                 darkMode ? 'from-blue-400 to-purple-400' : 'from-blue-600 to-purple-600'
               }`}>
                 Infinite Craft
               </h1>
-              <p className={`text-sm md:text-base mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                Discover endless combinations
+              <p className={`text-xs md:text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                {discovered.length} elements
               </p>
             </div>
-            <div className="flex gap-2 flex-wrap justify-end">
+            <div className="flex gap-1 flex-wrap justify-end">
               <button
                 onClick={toggleDarkMode}
-                className={`p-3 rounded-xl transition-all ${
+                className={`p-2 text-sm rounded-lg transition-all ${
                   darkMode
                     ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400'
                     : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
                 }`}
-                title="Toggle Dark Mode"
               >
                 {darkMode ? '☀️' : '🌙'}
               </button>
               <button
                 onClick={() => setShowLookup(true)}
-                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
                   darkMode
                     ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                    : 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
+                    : 'bg-indigo-500 hover:bg-indigo-600 text-white'
                 }`}
               >
-                🔍 Lookup
+                🔍
               </button>
               <button
                 onClick={() => setShowApiKeyInput(true)}
-                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
                   darkMode
                     ? 'bg-purple-600 hover:bg-purple-700 text-white'
-                    : 'bg-purple-500 hover:bg-purple-600 text-white shadow-lg shadow-purple-500/30'
+                    : 'bg-purple-500 hover:bg-purple-600 text-white'
                 }`}
               >
-                🔑 API Key
+                🔑
               </button>
-              <label className={`px-4 py-3 rounded-xl font-medium cursor-pointer transition-all ${
+              <label className={`px-2 py-2 text-sm rounded-lg font-medium cursor-pointer transition-all ${
                 darkMode
                   ? 'bg-green-600 hover:bg-green-700 text-white'
-                  : 'bg-green-500 hover:bg-green-600 text-white shadow-lg shadow-green-500/30'
+                  : 'bg-green-500 hover:bg-green-600 text-white'
               }`}>
-                📤 Load
+                📤
                 <input
                   type="file"
                   accept=".json"
@@ -815,30 +803,30 @@ const InfiniteCraft = () => {
               </label>
               <button
                 onClick={downloadProgress}
-                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
                   darkMode
                     ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                    : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white'
                 }`}
               >
-                💾 Save
+                💾
               </button>
               <button
                 onClick={clearWorkspace}
-                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
                   darkMode
                     ? 'bg-orange-600 hover:bg-orange-700 text-white'
-                    : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/30'
+                    : 'bg-orange-500 hover:bg-orange-600 text-white'
                 }`}
               >
                 🧹
               </button>
               <button
                 onClick={resetGame}
-                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
                   darkMode
                     ? 'bg-red-600 hover:bg-red-700 text-white'
-                    : 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/30'
+                    : 'bg-red-500 hover:bg-red-600 text-white'
                 }`}
               >
                 🔄
@@ -848,74 +836,25 @@ const InfiniteCraft = () => {
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar - Discovered Elements */}
-        <div className={`w-64 shadow-2xl overflow-y-auto border-r transition-colors duration-300 ${
-          darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-        }`}>
-          <div className={`p-4 sticky top-0 z-10 transition-colors duration-300 ${
-            darkMode ? 'bg-gradient-to-r from-blue-600 to-purple-600' : 'bg-gradient-to-r from-blue-500 to-purple-500'
-          }`}>
-            <h2 className="text-xl font-bold text-white">Elements</h2>
-            <p className="text-sm text-blue-100">{discovered.length} discovered</p>
-          </div>
-          <div className="p-3 space-y-2">
-            {discovered.map((item) => (
-              <div
-                key={item.id}
-                draggable
-                onDragStart={(e) => handleDragStart(e, item, 'sidebar')}
-                onTouchStart={(e) => handleTouchStart(e, item, 'sidebar')}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-                className={`p-3 rounded-xl cursor-move transition-all hover:scale-105 active:scale-95 ${
-                  darkMode
-                    ? 'bg-gradient-to-r from-gray-700 to-gray-600 hover:shadow-lg hover:shadow-purple-500/20'
-                    : 'bg-gradient-to-r from-blue-100 to-purple-100 hover:shadow-lg hover:shadow-purple-500/30'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <span className="text-2xl mr-2">{item.emoji}</span>
-                    <span className={`font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-                      {item.name}
-                    </span>
-                  </div>
-                  {item.discoveryCount > 0 && (
-                    <span className={`text-xs px-2 py-1 rounded-full font-bold ${
-                      darkMode
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-purple-500 text-white'
-                    }`}>
-                      {item.discoveryCount}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
+      {/* Main Content - Mobile: Column, Desktop: Row */}
+      <div className={`flex flex-1 overflow-hidden ${isMobile ? 'flex-col-reverse' : 'flex-row'}`}>
         {/* Workspace */}
         <div
           data-workspace="true"
-          className={`flex-1 relative overflow-hidden transition-colors duration-300 ${
+          className={`flex-1 relative workspace-area ${
             darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-blue-50 to-purple-50'
-          }`}
+          } ${isMobile ? 'overflow-hidden' : 'overflow-auto'}`}
           onDragOver={handleDragOver}
           onDrop={handleDropOnWorkspace}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
         >
           {workspace.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center">
-                <p className="text-7xl mb-4 animate-pulse">🎨</p>
-                <p className={`text-2xl font-bold mb-2 ${darkMode ? 'text-gray-400' : 'text-gray-400'}`}>
+                <p className={`${isMobile ? 'text-4xl' : 'text-6xl'} mb-2 animate-pulse-slow`}>🎨</p>
+                <p className={`${isMobile ? 'text-lg' : 'text-2xl'} font-bold mb-1 ${darkMode ? 'text-gray-400' : 'text-gray-400'}`}>
                   Drag elements here
                 </p>
-                <p className={`text-lg ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                <p className={`${isMobile ? 'text-sm' : 'text-lg'} ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
                   Drop one onto another to combine
                 </p>
               </div>
@@ -934,13 +873,15 @@ const InfiniteCraft = () => {
                 onDragOver={handleDragOver}
                 onDrop={(e) => !isLoadingThis && handleDropOnElement(e, item)}
                 onTouchStart={(e) => !isLoadingThis && handleTouchStart(e, item, 'workspace')}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
                 style={{
                   position: 'absolute',
                   left: `${item.x}px`,
                   top: `${item.y}px`,
                   transform: 'translate(-50%, -50%)'
                 }}
-                className={`p-5 rounded-2xl transition-all group shadow-xl ${
+                className={`${isMobile ? 'p-2' : 'p-4'} rounded-xl transition-all group shadow-lg draggable-item ${
                   isLoadingThis 
                     ? 'cursor-wait opacity-75' 
                     : 'cursor-move hover:scale-110 active:scale-95'
@@ -951,13 +892,13 @@ const InfiniteCraft = () => {
                 }`}
               >
                 {isLoadingThis && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-40 rounded-2xl backdrop-blur-sm">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                  <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-40 rounded-xl backdrop-blur-sm">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
                   </div>
                 )}
                 <button
                   onClick={() => removeFromWorkspace(item.workspaceId)}
-                  className={`absolute -top-2 -right-2 w-7 h-7 rounded-full opacity-0 group-hover:opacity-100 transition-all font-bold shadow-lg ${
+                  className={`absolute ${isMobile ? '-top-1 -right-1 w-5 h-5 text-xs' : '-top-2 -right-2 w-6 h-6 text-sm'} rounded-full opacity-0 group-hover:opacity-100 transition-all font-bold shadow-lg ${
                     darkMode
                       ? 'bg-red-600 hover:bg-red-700 text-white'
                       : 'bg-red-500 hover:bg-red-600 text-white'
@@ -966,8 +907,8 @@ const InfiniteCraft = () => {
                   ×
                 </button>
                 <div className="flex flex-col items-center">
-                  <span className="text-5xl mb-2">{item.emoji}</span>
-                  <span className={`text-sm font-semibold whitespace-nowrap ${
+                  <span className={`${isMobile ? 'text-3xl mb-1' : 'text-4xl mb-2'}`}>{item.emoji}</span>
+                  <span className={`${isMobile ? 'text-xs' : 'text-sm'} font-semibold whitespace-nowrap ${
                     darkMode ? 'text-gray-100' : 'text-gray-700'
                   }`}>
                     {item.name}
@@ -977,11 +918,62 @@ const InfiniteCraft = () => {
             );
           })}
         </div>
+
+        {/* Sidebar - Bottom on mobile, Left on desktop */}
+        <div className={`shadow-2xl overflow-hidden border transition-colors duration-300 ${
+          isMobile 
+            ? 'h-32 border-t' 
+            : 'w-64 border-r'
+        } ${
+          darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+        }`}>
+          <div className={`${isMobile ? 'px-3 py-2' : 'p-4'} sticky top-0 z-10 transition-colors duration-300 ${
+            darkMode ? 'bg-gradient-to-r from-blue-600 to-purple-600' : 'bg-gradient-to-r from-blue-500 to-purple-500'
+          }`}>
+            <h2 className={`${isMobile ? 'text-sm' : 'text-xl'} font-bold text-white`}>Elements</h2>
+          </div>
+          <div className={`${isMobile ? 'p-2 overflow-x-auto flex gap-2' : 'p-3 overflow-y-auto space-y-2'} sidebar-scroll`}
+               style={{height: isMobile ? 'calc(100% - 3rem)' : 'calc(100vh - 12rem)'}}>
+            {discovered.map((item) => (
+              <div
+                key={item.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, item, 'sidebar')}
+                onTouchStart={(e) => handleTouchStart(e, item, 'sidebar')}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                className={`${isMobile ? 'p-2 min-w-[80px] flex-shrink-0' : 'p-3'} rounded-xl cursor-move transition-all hover:scale-105 active:scale-95 draggable-item ${
+                  darkMode
+                    ? 'bg-gradient-to-r from-gray-700 to-gray-600 hover:shadow-lg hover:shadow-purple-500/20'
+                    : 'bg-gradient-to-r from-blue-100 to-purple-100 hover:shadow-lg hover:shadow-purple-500/30'
+                }`}
+              >
+                <div className={`flex ${isMobile ? 'flex-col' : 'flex-row'} items-center ${isMobile ? 'justify-center' : 'justify-between'}`}>
+                  <div className={`flex ${isMobile ? 'flex-col' : 'flex-row'} items-center ${isMobile ? 'gap-0' : 'gap-2'}`}>
+                    <span className={`${isMobile ? 'text-xl' : 'text-2xl'}`}>{item.emoji}</span>
+                    <span className={`${isMobile ? 'text-xs text-center mt-1' : 'text-sm'} font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
+                      {item.name}
+                    </span>
+                  </div>
+                  {item.discoveryCount > 0 && !isMobile && (
+                    <span className={`text-xs px-2 py-1 rounded-full font-bold ${
+                      darkMode
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-purple-500 text-white'
+                    }`}>
+                      {item.discoveryCount}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Notification */}
       {notification && (
-        <div className={`fixed top-24 left-1/2 transform -translate-x-1/2 px-8 py-4 rounded-full shadow-2xl z-50 animate-fadeIn font-medium ${
+        <div className={`fixed ${isMobile ? 'top-16 text-sm' : 'top-24'} left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full shadow-2xl z-50 animate-fadeIn font-medium ${
           darkMode ? 'bg-gray-800 text-white' : 'bg-black text-white'
         }`}>
           {notification}

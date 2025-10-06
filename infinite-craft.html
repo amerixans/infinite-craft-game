@@ -85,12 +85,9 @@ const InfiniteCraft = () => {
   const [workspace, setWorkspace] = useState([]);
   const [draggedItem, setDraggedItem] = useState(null);
   const [notification, setNotification] = useState('');
-  const [apiKey, setApiKey] = useState('');
   const [proxyUrl] = useState('https://infinite-craft-proxy-production.up.railway.app');
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [showLookup, setShowLookup] = useState(false);
   const [lookupSearch, setLookupSearch] = useState('');
-  const [isTesting, setIsTesting] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [loadingItems, setLoadingItems] = useState(new Set());
   const [isMobile, setIsMobile] = useState(false);
@@ -110,12 +107,10 @@ const InfiniteCraft = () => {
   }, []);
 
   useEffect(() => {
-    const savedApiKey = localStorage.getItem('infinitecraft_apikey');
     const savedDiscovered = localStorage.getItem('infinitecraft_discovered');
     const savedRecipeCache = localStorage.getItem('infinitecraft_recipes');
     const savedDarkMode = localStorage.getItem('infinitecraft_darkmode');
     
-    if (savedApiKey) setApiKey(savedApiKey);
     if (savedDarkMode) setDarkMode(savedDarkMode === 'true');
     if (savedDiscovered) {
       try {
@@ -154,63 +149,7 @@ const InfiniteCraft = () => {
     setDarkMode(!darkMode);
   };
 
-  const saveApiKey = () => {
-    localStorage.setItem('infinitecraft_apikey', apiKey);
-    setShowApiKeyInput(false);
-    showNotification('✅ API Key saved!');
-  };
-
-  const testApiKey = async () => {
-    if (!apiKey) {
-      showNotification('❌ Please enter an API key first');
-      return;
-    }
-
-    setIsTesting(true);
-    
-    try {
-      const response = await fetch(`${proxyUrl}/api/test`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ apiKey })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = 'API test failed';
-        try {
-          const errorJson = JSON.parse(errorText);
-          errorMessage = errorJson.error?.message || errorMessage;
-        } catch (e) {
-          errorMessage = errorText;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      showNotification('✅ API Key is working!');
-      setIsTesting(false);
-    } catch (error) {
-      let userMessage = error.message;
-      
-      if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        userMessage = 'CORS Error: You need to deploy the proxy server.';
-      }
-      
-      showNotification('❌ ' + userMessage);
-      setIsTesting(false);
-    }
-  };
-
   const generateWithAI = async (item1Name, item2Name) => {
-    if (!apiKey) {
-      showNotification('❌ Please set your OpenAI API key first!');
-      setShowApiKeyInput(true);
-      return null;
-    }
-    
     try {
       const response = await fetch(`${proxyUrl}/api/craft`, {
         method: 'POST',
@@ -218,7 +157,6 @@ const InfiniteCraft = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          apiKey,
           item1: item1Name,
           item2: item2Name
         })
@@ -229,7 +167,7 @@ const InfiniteCraft = () => {
         let errorMessage = 'API call failed';
         try {
           const errorJson = JSON.parse(errorText);
-          errorMessage = errorJson.error?.message || errorMessage;
+          errorMessage = errorJson.error || errorMessage;
         } catch (e) {
           errorMessage = errorText;
         }
@@ -244,8 +182,10 @@ const InfiniteCraft = () => {
       
       return result;
     } catch (error) {
-      if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        showNotification('❌ CORS Error - Set proxy URL in settings');
+      if (error.message.includes('Too many requests') || error.message.includes('Crafting too fast')) {
+        showNotification('⏳ Slow down! Rate limit reached.');
+      } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        showNotification('❌ Cannot connect to server');
       } else {
         showNotification('❌ Error: ' + error.message);
       }
@@ -595,71 +535,6 @@ const InfiniteCraft = () => {
 
   return (
     <div className={`w-full h-screen flex flex-col transition-colors duration-300 ${darkMode ? 'dark bg-gray-900' : 'bg-gradient-to-br from-blue-50 to-purple-50'}`}>
-      {/* API Key Modal */}
-      {showApiKeyInput && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn p-4">
-          <div className={`rounded-2xl p-6 max-w-md w-full shadow-2xl animate-slideUp ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <h3 className={`text-xl font-bold mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-              API Key Required
-            </h3>
-            <p className={`text-xs mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              Enter your OpenAI API key to start crafting
-            </p>
-            
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
-              className={`w-full px-3 py-2 text-sm border rounded-xl mb-3 focus:outline-none focus:ring-2 transition-all ${
-                darkMode 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500' 
-                  : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
-              }`}
-            />
-            
-            <div className="flex gap-2 mb-3">
-              <button
-                onClick={testApiKey}
-                disabled={isTesting}
-                className={`flex-1 px-3 py-2 text-sm rounded-xl font-medium transition-all ${
-                  isTesting 
-                    ? 'bg-gray-400 cursor-not-allowed' 
-                    : darkMode
-                      ? 'bg-green-600 hover:bg-green-700 text-white'
-                      : 'bg-green-500 hover:bg-green-600 text-white'
-                }`}
-              >
-                {isTesting ? 'Testing...' : '🧪 Test'}
-              </button>
-              <button
-                onClick={saveApiKey}
-                className={`flex-1 px-3 py-2 text-sm rounded-xl font-medium transition-all ${
-                  darkMode
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                    : 'bg-blue-500 hover:bg-blue-600 text-white'
-                }`}
-              >
-                💾 Save
-              </button>
-            </div>
-            <button
-              onClick={() => setShowApiKeyInput(false)}
-              className={`w-full px-3 py-2 text-sm rounded-xl font-medium transition-all ${
-                darkMode
-                  ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                  : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-              }`}
-            >
-              Cancel
-            </button>
-            <p className={`text-xs mt-3 text-center ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-              Get your key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className={`${darkMode ? 'text-blue-400' : 'text-blue-500'}`}>platform.openai.com</a>
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Lookup Modal */}
       {showLookup && (
         <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn p-4">
@@ -777,16 +652,6 @@ const InfiniteCraft = () => {
                 }`}
               >
                 🔍
-              </button>
-              <button
-                onClick={() => setShowApiKeyInput(true)}
-                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
-                  darkMode
-                    ? 'bg-purple-600 hover:bg-purple-700 text-white'
-                    : 'bg-purple-500 hover:bg-purple-600 text-white'
-                }`}
-              >
-                🔑
               </button>
               <label className={`px-2 py-2 text-sm rounded-lg font-medium cursor-pointer transition-all ${
                 darkMode

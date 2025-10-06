@@ -27,7 +27,7 @@ const InfiniteCraft = () => {
   const [draggedItem, setDraggedItem] = useState(null);
   const [notification, setNotification] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [proxyUrl, setProxyUrl] = useState('');
+  const [proxyUrl, setProxyUrl] = useState('https://infinite-craft-proxy-production.up.railway.app');
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -493,20 +493,20 @@ const InfiniteCraft = () => {
             />
             
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Proxy Server URL (from Railway) *
+              Proxy Server URL ✓
             </label>
             <input
               type="text"
               value={proxyUrl}
               onChange={(e) => setProxyUrl(e.target.value)}
               placeholder="https://your-app.up.railway.app"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
             />
             
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm">
-              <p className="text-yellow-800 font-medium mb-1">⚠️ Both fields required</p>
-              <p className="text-yellow-700">
-                Paste your Railway URL from Step 4 of the setup wizard.
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4 text-sm">
+              <p className="text-green-800 font-medium mb-1">✅ Proxy Pre-Configured</p>
+              <p className="text-green-700">
+                The Railway proxy is already set up. Just enter your OpenAI API key above!
               </p>
             </div>
             

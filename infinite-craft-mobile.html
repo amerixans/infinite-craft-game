@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>Infinite Craft - Discover the Elements</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        body {
+            touch-action: none;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .dark {
+            color-scheme: dark;
+        }
+        
+        .workspace-area {
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        .draggable-item {
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        .sidebar-scroll {
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-x pan-y;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .animate-fadeIn {
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slideUp {
+            animation: slideUp 0.4s ease-out;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-slow {
+            animation: pulse 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="transition-colors duration-300">
+    <div id="root"></div>
+    
+    <script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+const InfiniteCraft = () => {
+  const [discovered, setDiscovered] = useState([
+    { id: 1, name: 'Water', emoji: '💧', discoveryCount: 0, recipe: null },
+    { id: 2, name: 'Fire', emoji: '🔥', discoveryCount: 0, recipe: null },
+    { id: 3, name: 'Earth', emoji: '🌍', discoveryCount: 0, recipe: null },
+    { id: 4, name: 'Wind', emoji: '💨', discoveryCount: 0, recipe: null }
+  ]);
+  
+  const [workspace, setWorkspace] = useState([]);
+  const [draggedItem, setDraggedItem] = useState(null);
+  const [notification, setNotification] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [proxyUrl] = useState('https://infinite-craft-proxy-production.up.railway.app');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [showLookup, setShowLookup] = useState(false);
+  const [lookupSearch, setLookupSearch] = useState('');
+  const [isTesting, setIsTesting] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+  const [loadingItems, setLoadingItems] = useState(new Set());
+  const [isMobile, setIsMobile] = useState(false);
+  const nextId = useRef(5);
+  const touchStartPos = useRef(null);
+  const dragClone = useRef(null);
+  
+  const [recipeCache, setRecipeCache] = useState({});
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  useEffect(() => {
+    const savedApiKey = localStorage.getItem('infinitecraft_apikey');
+    const savedDiscovered = localStorage.getItem('infinitecraft_discovered');
+    const savedRecipeCache = localStorage.getItem('infinitecraft_recipes');
+    const savedDarkMode = localStorage.getItem('infinitecraft_darkmode');
+    
+    if (savedApiKey) setApiKey(savedApiKey);
+    if (savedDarkMode) setDarkMode(savedDarkMode === 'true');
+    if (savedDiscovered) {
+      try {
+        setDiscovered(JSON.parse(savedDiscovered));
+      } catch (e) {
+        console.error('Failed to load discovered items:', e);
+      }
+    }
+    if (savedRecipeCache) {
+      try {
+        setRecipeCache(JSON.parse(savedRecipeCache));
+      } catch (e) {
+        console.error('Failed to load recipe cache:', e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('infinitecraft_discovered', JSON.stringify(discovered));
+  }, [discovered]);
+
+  useEffect(() => {
+    localStorage.setItem('infinitecraft_recipes', JSON.stringify(recipeCache));
+  }, [recipeCache]);
+
+  useEffect(() => {
+    localStorage.setItem('infinitecraft_darkmode', darkMode);
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
+  const toggleDarkMode = () => {
+    setDarkMode(!darkMode);
+  };
+
+  const saveApiKey = () => {
+    localStorage.setItem('infinitecraft_apikey', apiKey);
+    setShowApiKeyInput(false);
+    showNotification('✅ API Key saved!');
+  };
+
+  const testApiKey = async () => {
+    if (!apiKey) {
+      showNotification('❌ Please enter an API key first');
+      return;
+    }
+
+    setIsTesting(true);
+    
+    try {
+      const response = await fetch(`${proxyUrl}/api/test`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ apiKey })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = 'API test failed';
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error?.message || errorMessage;
+        } catch (e) {
+          errorMessage = errorText;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      showNotification('✅ API Key is working!');
+      setIsTesting(false);
+    } catch (error) {
+      let userMessage = error.message;
+      
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        userMessage = 'CORS Error: You need to deploy the proxy server.';
+      }
+      
+      showNotification('❌ ' + userMessage);
+      setIsTesting(false);
+    }
+  };
+
+  const generateWithAI = async (item1Name, item2Name) => {
+    if (!apiKey) {
+      showNotification('❌ Please set your OpenAI API key first!');
+      setShowApiKeyInput(true);
+      return null;
+    }
+    
+    try {
+      const response = await fetch(`${proxyUrl}/api/craft`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          apiKey,
+          item1: item1Name,
+          item2: item2Name
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = 'API call failed';
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error?.message || errorMessage;
+        } catch (e) {
+          errorMessage = errorText;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const result = await response.json();
+      
+      if (!result.name || !result.emoji) {
+        throw new Error('Invalid response format - missing name or emoji');
+      }
+      
+      return result;
+    } catch (error) {
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        showNotification('❌ CORS Error - Set proxy URL in settings');
+      } else {
+        showNotification('❌ Error: ' + error.message);
+      }
+      
+      return null;
+    }
+  };
+
+  const trackDiscovery = async (itemName) => {
+    try {
+      await fetch(`${proxyUrl}/api/track-discovery`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ item: itemName })
+      });
+    } catch (error) {
+      console.error('Failed to track discovery:', error);
+    }
+  };
+
+  const getDiscoveryCount = async (itemName) => {
+    try {
+      const response = await fetch(`${proxyUrl}/api/discovery-count/${encodeURIComponent(itemName)}`);
+      if (response.ok) {
+        const data = await response.json();
+        return data.count || 0;
+      }
+    } catch (error) {
+      console.error('Failed to get discovery count:', error);
+    }
+    return 0;
+  };
+
+  const createRecipeKey = (name1, name2) => {
+    const sorted = [name1.toLowerCase(), name2.toLowerCase()].sort();
+    return `${sorted[0]}+${sorted[1]}`;
+  };
+
+  const findOrCreateRecipe = async (item1, item2) => {
+    const recipeKey = createRecipeKey(item1.name, item2.name);
+    
+    if (recipeCache[recipeKey]) {
+      return recipeCache[recipeKey];
+    }
+    
+    const aiResult = await generateWithAI(item1.name, item2.name);
+    
+    if (aiResult) {
+      const newCache = {
+        ...recipeCache,
+        [recipeKey]: aiResult
+      };
+      setRecipeCache(newCache);
+      return aiResult;
+    }
+    
+    return null;
+  };
+
+  const showNotification = (message) => {
+    setNotification(message);
+    setTimeout(() => setNotification(''), 3000);
+  };
+
+  // Desktop drag handlers
+  const handleDragStart = (e, item, source) => {
+    setDraggedItem({ ...item, source });
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDropOnWorkspace = (e) => {
+    e.preventDefault();
+    if (!draggedItem) return;
+
+    const workspaceRect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - workspaceRect.left;
+    const y = e.clientY - workspaceRect.top;
+
+    if (draggedItem.source === 'workspace') {
+      setWorkspace(prev => prev.map(item => 
+        item.workspaceId === draggedItem.workspaceId
+          ? { ...item, x, y }
+          : item
+      ));
+    } else {
+      const newItem = {
+        ...draggedItem,
+        workspaceId: Date.now() + Math.random(),
+        x,
+        y
+      };
+      setWorkspace(prev => [...prev, newItem]);
+    }
+    
+    setDraggedItem(null);
+  };
+
+  const handleDropOnElement = async (e, targetItem) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!draggedItem || draggedItem.workspaceId === targetItem.workspaceId) {
+      setDraggedItem(null);
+      return;
+    }
+    
+    setLoadingItems(prev => new Set([...prev, targetItem.workspaceId]));
+    
+    const recipe = await findOrCreateRecipe(draggedItem, targetItem);
+    
+    setLoadingItems(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(targetItem.workspaceId);
+      return newSet;
+    });
+    
+    if (recipe && recipe.name && recipe.emoji) {
+      const isNew = !discovered.some(d => d.name.toLowerCase() === recipe.name.toLowerCase());
+      
+      if (isNew) {
+        trackDiscovery(recipe.name);
+        const count = await getDiscoveryCount(recipe.name);
+        
+        const newElement = {
+          id: nextId.current++,
+          name: recipe.name,
+          emoji: recipe.emoji,
+          discoveryCount: count,
+          recipe: { item1: draggedItem.name, item2: targetItem.name }
+        };
+        setDiscovered(prev => [...prev, newElement]);
+        showNotification(`✨ NEW! Discovered: ${recipe.emoji} ${recipe.name}`);
+      } else {
+        const count = await getDiscoveryCount(recipe.name);
+        setDiscovered(prev => prev.map(item => 
+          item.name.toLowerCase() === recipe.name.toLowerCase()
+            ? { ...item, discoveryCount: count }
+            : item
+        ));
+        showNotification(`Created: ${recipe.emoji} ${recipe.name}`);
+      }
+
+      const newItem = {
+        id: nextId.current++,
+        name: recipe.name,
+        emoji: recipe.emoji,
+        workspaceId: Date.now() + Math.random(),
+        x: targetItem.x,
+        y: targetItem.y
+      };
+      
+      setWorkspace(prev => {
+        const filtered = prev.filter(item => 
+          item.workspaceId !== draggedItem.workspaceId && 
+          item.workspaceId !== targetItem.workspaceId
+        );
+        return [...filtered, newItem];
+      });
+    } else {
+      showNotification('❌ Failed to create combination');
+    }
+    
+    setDraggedItem(null);
+  };
+
+  // Mobile touch handlers
+  const handleTouchStart = (e, item, source) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const touch = e.touches[0];
+    touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+    
+    setDraggedItem({ ...item, source });
+    
+    // Create visual clone
+    const element = e.currentTarget;
+    const clone = element.cloneNode(true);
+    clone.style.position = 'fixed';
+    clone.style.pointerEvents = 'none';
+    clone.style.opacity = '0.8';
+    clone.style.zIndex = '10000';
+    clone.style.left = `${touch.clientX - element.offsetWidth / 2}px`;
+    clone.style.top = `${touch.clientY - element.offsetHeight / 2}px`;
+    clone.id = 'touch-drag-clone';
+    document.body.appendChild(clone);
+    dragClone.current = clone;
+  };
+
+  const handleTouchMove = (e) => {
+    if (!draggedItem || !dragClone.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const touch = e.touches[0];
+    dragClone.current.style.left = `${touch.clientX - dragClone.current.offsetWidth / 2}px`;
+    dragClone.current.style.top = `${touch.clientY - dragClone.current.offsetHeight / 2}px`;
+  };
+
+  const handleTouchEnd = async (e) => {
+    if (!draggedItem) return;
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Remove clone
+    if (dragClone.current) {
+      document.body.removeChild(dragClone.current);
+      dragClone.current = null;
+    }
+    
+    const touch = e.changedTouches[0];
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+    
+    if (!element) {
+      setDraggedItem(null);
+      return;
+    }
+    
+    // Check if dropped on workspace item
+    const workspaceItem = element.closest('[data-workspace-item]');
+    if (workspaceItem) {
+      const targetId = workspaceItem.dataset.workspaceItem;
+      const targetItem = workspace.find(item => item.workspaceId == targetId);
+      if (targetItem && targetItem.workspaceId !== draggedItem.workspaceId) {
+        await handleDropOnElement({ preventDefault: () => {}, stopPropagation: () => {} }, targetItem);
+        return;
+      }
+    }
+    
+    // Check if dropped on workspace
+    const workspaceEl = document.querySelector('[data-workspace="true"]');
+    if (workspaceEl && (workspaceEl === element || workspaceEl.contains(element))) {
+      const workspaceRect = workspaceEl.getBoundingClientRect();
+      const x = touch.clientX - workspaceRect.left;
+      const y = touch.clientY - workspaceRect.top;
+      
+      if (draggedItem.source === 'workspace') {
+        setWorkspace(prev => prev.map(item => 
+          item.workspaceId === draggedItem.workspaceId
+            ? { ...item, x, y }
+            : item
+        ));
+      } else {
+        const newItem = {
+          ...draggedItem,
+          workspaceId: Date.now() + Math.random(),
+          x,
+          y
+        };
+        setWorkspace(prev => [...prev, newItem]);
+      }
+    }
+    
+    setDraggedItem(null);
+  };
+
+  const removeFromWorkspace = (workspaceId) => {
+    setWorkspace(workspace.filter(item => item.workspaceId !== workspaceId));
+  };
+
+  const clearWorkspace = () => {
+    setWorkspace([]);
+    showNotification('🧹 Workspace cleared');
+  };
+
+  const resetGame = () => {
+    if (confirm('Are you sure you want to reset all progress? This will delete all discovered items and recipes.')) {
+      setDiscovered([
+        { id: 1, name: 'Water', emoji: '💧', discoveryCount: 0, recipe: null },
+        { id: 2, name: 'Fire', emoji: '🔥', discoveryCount: 0, recipe: null },
+        { id: 3, name: 'Earth', emoji: '🌍', discoveryCount: 0, recipe: null },
+        { id: 4, name: 'Wind', emoji: '💨', discoveryCount: 0, recipe: null }
+      ]);
+      setWorkspace([]);
+      setRecipeCache({});
+      nextId.current = 5;
+      localStorage.removeItem('infinitecraft_discovered');
+      localStorage.removeItem('infinitecraft_recipes');
+      showNotification('🔄 Game reset!');
+    }
+  };
+
+  const filteredDiscoveries = discovered.filter(item =>
+    item.name.toLowerCase().includes(lookupSearch.toLowerCase())
+  );
+
+  const downloadProgress = () => {
+    const saveData = {
+      version: 1,
+      discovered,
+      recipeCache,
+      timestamp: new Date().toISOString()
+    };
+    
+    const blob = new Blob([JSON.stringify(saveData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `infinite-craft-save-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showNotification('💾 Progress downloaded!');
+  };
+
+  const uploadProgress = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const saveData = JSON.parse(event.target.result);
+        
+        if (saveData.version !== 1) {
+          showNotification('❌ Invalid save file version');
+          return;
+        }
+        
+        if (saveData.discovered && Array.isArray(saveData.discovered)) {
+          setDiscovered(saveData.discovered);
+          const maxId = Math.max(...saveData.discovered.map(d => d.id), 4);
+          nextId.current = maxId + 1;
+        }
+        
+        if (saveData.recipeCache) {
+          setRecipeCache(saveData.recipeCache);
+        }
+        
+        showNotification('📤 Progress loaded successfully!');
+      } catch (error) {
+        showNotification('❌ Failed to load save file');
+        console.error('Load error:', error);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div className={`w-full h-screen flex flex-col transition-colors duration-300 ${darkMode ? 'dark bg-gray-900' : 'bg-gradient-to-br from-blue-50 to-purple-50'}`}>
+      {/* API Key Modal */}
+      {showApiKeyInput && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn p-4">
+          <div className={`rounded-2xl p-6 max-w-md w-full shadow-2xl animate-slideUp ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+            <h3 className={`text-xl font-bold mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              API Key Required
+            </h3>
+            <p className={`text-xs mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              Enter your OpenAI API key to start crafting
+            </p>
+            
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="sk-..."
+              className={`w-full px-3 py-2 text-sm border rounded-xl mb-3 focus:outline-none focus:ring-2 transition-all ${
+                darkMode 
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500' 
+                  : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
+              }`}
+            />
+            
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={testApiKey}
+                disabled={isTesting}
+                className={`flex-1 px-3 py-2 text-sm rounded-xl font-medium transition-all ${
+                  isTesting 
+                    ? 'bg-gray-400 cursor-not-allowed' 
+                    : darkMode
+                      ? 'bg-green-600 hover:bg-green-700 text-white'
+                      : 'bg-green-500 hover:bg-green-600 text-white'
+                }`}
+              >
+                {isTesting ? 'Testing...' : '🧪 Test'}
+              </button>
+              <button
+                onClick={saveApiKey}
+                className={`flex-1 px-3 py-2 text-sm rounded-xl font-medium transition-all ${
+                  darkMode
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white'
+                }`}
+              >
+                💾 Save
+              </button>
+            </div>
+            <button
+              onClick={() => setShowApiKeyInput(false)}
+              className={`w-full px-3 py-2 text-sm rounded-xl font-medium transition-all ${
+                darkMode
+                  ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+              }`}
+            >
+              Cancel
+            </button>
+            <p className={`text-xs mt-3 text-center ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+              Get your key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className={`${darkMode ? 'text-blue-400' : 'text-blue-500'}`}>platform.openai.com</a>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Lookup Modal */}
+      {showLookup && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn p-4">
+          <div className={`rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-slideUp ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                🔍 Recipe Lookup
+              </h3>
+              <button
+                onClick={() => setShowLookup(false)}
+                className={`px-3 py-2 text-sm rounded-xl font-medium transition-all ${
+                  darkMode
+                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                }`}
+              >
+                Close
+              </button>
+            </div>
+            
+            <input
+              type="text"
+              value={lookupSearch}
+              onChange={(e) => setLookupSearch(e.target.value)}
+              placeholder="Search for an element..."
+              className={`w-full px-3 py-2 text-sm border rounded-xl mb-4 focus:outline-none focus:ring-2 transition-all ${
+                darkMode 
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500' 
+                  : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
+              }`}
+            />
+            
+            <div className="space-y-2">
+              {filteredDiscoveries.map((item) => (
+                <div
+                  key={item.id}
+                  className={`p-3 rounded-xl ${
+                    darkMode
+                      ? 'bg-gray-700'
+                      : 'bg-gradient-to-r from-blue-50 to-purple-50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">{item.emoji}</span>
+                      <div>
+                        <p className={`font-bold text-sm ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                          {item.name}
+                        </p>
+                        {item.recipe ? (
+                          <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                            {item.recipe.item1} + {item.recipe.item2}
+                          </p>
+                        ) : (
+                          <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                            Starting element
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {item.discoveryCount > 0 && (
+                      <div className={`px-2 py-1 rounded-full text-xs font-bold ${
+                        darkMode
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-purple-500 text-white'
+                      }`}>
+                        {item.discoveryCount}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              
+              {filteredDiscoveries.length === 0 && (
+                <p className={`text-center py-8 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  No elements found
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className={`shadow-lg transition-colors duration-300 ${darkMode ? 'bg-gray-800 shadow-gray-900/50' : 'bg-white'}`}>
+        <div className="p-3">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className={`text-xl md:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r ${
+                darkMode ? 'from-blue-400 to-purple-400' : 'from-blue-600 to-purple-600'
+              }`}>
+                Infinite Craft
+              </h1>
+              <p className={`text-xs md:text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                {discovered.length} elements
+              </p>
+            </div>
+            <div className="flex gap-1 flex-wrap justify-end">
+              <button
+                onClick={toggleDarkMode}
+                className={`p-2 text-sm rounded-lg transition-all ${
+                  darkMode
+                    ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                }`}
+              >
+                {darkMode ? '☀️' : '🌙'}
+              </button>
+              <button
+                onClick={() => setShowLookup(true)}
+                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
+                  darkMode
+                    ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                    : 'bg-indigo-500 hover:bg-indigo-600 text-white'
+                }`}
+              >
+                🔍
+              </button>
+              <button
+                onClick={() => setShowApiKeyInput(true)}
+                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
+                  darkMode
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                    : 'bg-purple-500 hover:bg-purple-600 text-white'
+                }`}
+              >
+                🔑
+              </button>
+              <label className={`px-2 py-2 text-sm rounded-lg font-medium cursor-pointer transition-all ${
+                darkMode
+                  ? 'bg-green-600 hover:bg-green-700 text-white'
+                  : 'bg-green-500 hover:bg-green-600 text-white'
+              }`}>
+                📤
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={uploadProgress}
+                  className="hidden"
+                />
+              </label>
+              <button
+                onClick={downloadProgress}
+                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
+                  darkMode
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white'
+                }`}
+              >
+                💾
+              </button>
+              <button
+                onClick={clearWorkspace}
+                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
+                  darkMode
+                    ? 'bg-orange-600 hover:bg-orange-700 text-white'
+                    : 'bg-orange-500 hover:bg-orange-600 text-white'
+                }`}
+              >
+                🧹
+              </button>
+              <button
+                onClick={resetGame}
+                className={`px-2 py-2 text-sm rounded-lg font-medium transition-all ${
+                  darkMode
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-red-500 hover:bg-red-600 text-white'
+                }`}
+              >
+                🔄
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content - Mobile: Column, Desktop: Row */}
+      <div className={`flex flex-1 overflow-hidden ${isMobile ? 'flex-col-reverse' : 'flex-row'}`}>
+        {/* Workspace */}
+        <div
+          data-workspace="true"
+          className={`flex-1 relative workspace-area ${
+            darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-blue-50 to-purple-50'
+          } ${isMobile ? 'overflow-hidden' : 'overflow-auto'}`}
+          onDragOver={handleDragOver}
+          onDrop={handleDropOnWorkspace}
+        >
+          {workspace.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="text-center">
+                <p className={`${isMobile ? 'text-4xl' : 'text-6xl'} mb-2 animate-pulse-slow`}>🎨</p>
+                <p className={`${isMobile ? 'text-lg' : 'text-2xl'} font-bold mb-1 ${darkMode ? 'text-gray-400' : 'text-gray-400'}`}>
+                  Drag elements here
+                </p>
+                <p className={`${isMobile ? 'text-sm' : 'text-lg'} ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                  Drop one onto another to combine
+                </p>
+              </div>
+            </div>
+          )}
+          
+          {workspace.map((item) => {
+            const isLoadingThis = loadingItems.has(item.workspaceId);
+            
+            return (
+              <div
+                key={item.workspaceId}
+                data-workspace-item={item.workspaceId}
+                draggable={!isLoadingThis}
+                onDragStart={(e) => !isLoadingThis && handleDragStart(e, item, 'workspace')}
+                onDragOver={handleDragOver}
+                onDrop={(e) => !isLoadingThis && handleDropOnElement(e, item)}
+                onTouchStart={(e) => !isLoadingThis && handleTouchStart(e, item, 'workspace')}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                style={{
+                  position: 'absolute',
+                  left: `${item.x}px`,
+                  top: `${item.y}px`,
+                  transform: 'translate(-50%, -50%)'
+                }}
+                className={`${isMobile ? 'p-2' : 'p-4'} rounded-xl transition-all group shadow-lg draggable-item ${
+                  isLoadingThis 
+                    ? 'cursor-wait opacity-75' 
+                    : 'cursor-move hover:scale-110 active:scale-95'
+                } ${
+                  darkMode
+                    ? 'bg-gray-800 hover:shadow-2xl hover:shadow-purple-500/30'
+                    : 'bg-white hover:shadow-2xl hover:shadow-purple-500/40'
+                }`}
+              >
+                {isLoadingThis && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-40 rounded-xl backdrop-blur-sm">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+                  </div>
+                )}
+                <button
+                  onClick={() => removeFromWorkspace(item.workspaceId)}
+                  className={`absolute ${isMobile ? '-top-1 -right-1 w-5 h-5 text-xs' : '-top-2 -right-2 w-6 h-6 text-sm'} rounded-full opacity-0 group-hover:opacity-100 transition-all font-bold shadow-lg ${
+                    darkMode
+                      ? 'bg-red-600 hover:bg-red-700 text-white'
+                      : 'bg-red-500 hover:bg-red-600 text-white'
+                  }`}
+                >
+                  ×
+                </button>
+                <div className="flex flex-col items-center">
+                  <span className={`${isMobile ? 'text-3xl mb-1' : 'text-4xl mb-2'}`}>{item.emoji}</span>
+                  <span className={`${isMobile ? 'text-xs' : 'text-sm'} font-semibold whitespace-nowrap ${
+                    darkMode ? 'text-gray-100' : 'text-gray-700'
+                  }`}>
+                    {item.name}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Sidebar - Bottom on mobile, Left on desktop */}
+        <div className={`shadow-2xl overflow-hidden border transition-colors duration-300 ${
+          isMobile 
+            ? 'h-32 border-t' 
+            : 'w-64 border-r'
+        } ${
+          darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+        }`}>
+          <div className={`${isMobile ? 'px-3 py-2' : 'p-4'} sticky top-0 z-10 transition-colors duration-300 ${
+            darkMode ? 'bg-gradient-to-r from-blue-600 to-purple-600' : 'bg-gradient-to-r from-blue-500 to-purple-500'
+          }`}>
+            <h2 className={`${isMobile ? 'text-sm' : 'text-xl'} font-bold text-white`}>Elements</h2>
+          </div>
+          <div className={`${isMobile ? 'p-2 overflow-x-auto flex gap-2' : 'p-3 overflow-y-auto space-y-2'} sidebar-scroll`}
+               style={{height: isMobile ? 'calc(100% - 3rem)' : 'calc(100vh - 12rem)'}}>
+            {discovered.map((item) => (
+              <div
+                key={item.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, item, 'sidebar')}
+                onTouchStart={(e) => handleTouchStart(e, item, 'sidebar')}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                className={`${isMobile ? 'p-2 min-w-[80px] flex-shrink-0' : 'p-3'} rounded-xl cursor-move transition-all hover:scale-105 active:scale-95 draggable-item ${
+                  darkMode
+                    ? 'bg-gradient-to-r from-gray-700 to-gray-600 hover:shadow-lg hover:shadow-purple-500/20'
+                    : 'bg-gradient-to-r from-blue-100 to-purple-100 hover:shadow-lg hover:shadow-purple-500/30'
+                }`}
+              >
+                <div className={`flex ${isMobile ? 'flex-col' : 'flex-row'} items-center ${isMobile ? 'justify-center' : 'justify-between'}`}>
+                  <div className={`flex ${isMobile ? 'flex-col' : 'flex-row'} items-center ${isMobile ? 'gap-0' : 'gap-2'}`}>
+                    <span className={`${isMobile ? 'text-xl' : 'text-2xl'}`}>{item.emoji}</span>
+                    <span className={`${isMobile ? 'text-xs text-center mt-1' : 'text-sm'} font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
+                      {item.name}
+                    </span>
+                  </div>
+                  {item.discoveryCount > 0 && !isMobile && (
+                    <span className={`text-xs px-2 py-1 rounded-full font-bold ${
+                      darkMode
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-purple-500 text-white'
+                    }`}>
+                      {item.discoveryCount}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Notification */}
+      {notification && (
+        <div className={`fixed ${isMobile ? 'top-16 text-sm' : 'top-24'} left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full shadow-2xl z-50 animate-fadeIn font-medium ${
+          darkMode ? 'bg-gray-800 text-white' : 'bg-black text-white'
+        }`}>
+          {notification}
+        </div>
+      )}
+    </div>
+  );
+};
+
+ReactDOM.render(<InfiniteCraft />, document.getElementById('root'));
+    </script>
+</body>
+</html>

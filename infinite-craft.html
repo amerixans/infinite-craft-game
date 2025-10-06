@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinite Craft - AI Powered</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+const InfiniteCraft = () => {
+  const [discovered, setDiscovered] = useState([
+    { id: 1, name: 'Water', emoji: '💧' },
+    { id: 2, name: 'Fire', emoji: '🔥' },
+    { id: 3, name: 'Earth', emoji: '🌍' },
+    { id: 4, name: 'Wind', emoji: '💨' }
+  ]);
+  
+  const [workspace, setWorkspace] = useState([]);
+  const [draggedItem, setDraggedItem] = useState(null);
+  const [notification, setNotification] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [proxyUrl, setProxyUrl] = useState('');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const nextId = useRef(5);
+  
+  const [recipeCache, setRecipeCache] = useState({});
+
+  useEffect(() => {
+    const savedApiKey = localStorage.getItem('infinitecraft_apikey');
+    const savedProxyUrl = localStorage.getItem('infinitecraft_proxyurl');
+    const savedDiscovered = localStorage.getItem('infinitecraft_discovered');
+    const savedRecipeCache = localStorage.getItem('infinitecraft_recipes');
+    
+    if (savedApiKey) setApiKey(savedApiKey);
+    if (savedProxyUrl) setProxyUrl(savedProxyUrl);
+    if (savedDiscovered) {
+      try {
+        setDiscovered(JSON.parse(savedDiscovered));
+      } catch (e) {
+        console.error('Failed to load discovered items:', e);
+      }
+    }
+    if (savedRecipeCache) {
+      try {
+        setRecipeCache(JSON.parse(savedRecipeCache));
+      } catch (e) {
+        console.error('Failed to load recipe cache:', e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('infinitecraft_discovered', JSON.stringify(discovered));
+  }, [discovered]);
+
+  useEffect(() => {
+    localStorage.setItem('infinitecraft_recipes', JSON.stringify(recipeCache));
+  }, [recipeCache]);
+
+  const saveApiKey = () => {
+    localStorage.setItem('infinitecraft_apikey', apiKey);
+    localStorage.setItem('infinitecraft_proxyurl', proxyUrl);
+    setShowApiKeyInput(false);
+    showNotification('✅ Settings saved!');
+  };
+
+  const testApiKey = async () => {
+    if (!apiKey) {
+      showNotification('❌ Please enter an API key first');
+      return;
+    }
+
+    setIsTesting(true);
+    
+    try {
+      console.log('🧪 Testing API key...');
+      console.log('🔑 Key starts with:', apiKey.substring(0, 7) + '...');
+      
+      let response;
+      
+      if (proxyUrl) {
+        console.log('📡 Using proxy:', proxyUrl);
+        response = await fetch(`${proxyUrl}/api/test`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ apiKey })
+        });
+      } else {
+        console.log('📡 Attempting direct OpenAI call (may fail due to CORS)...');
+        response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'user',
+                content: 'Respond with just the word "success"'
+              }
+            ],
+            max_tokens: 10
+          })
+        });
+      }
+
+      console.log('📡 Response received, status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Error response body:', errorText);
+        let errorMessage = 'API test failed';
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error?.message || errorMessage;
+          console.error('❌ Parsed error:', errorJson);
+        } catch (e) {
+          errorMessage = errorText;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      console.log('✅ API test successful:', data);
+      showNotification('✅ API Key is working!');
+      setIsTesting(false);
+    } catch (error) {
+      console.error('💥 Full error object:', error);
+      console.error('💥 Error name:', error.name);
+      console.error('💥 Error message:', error.message);
+      
+      let userMessage = error.message;
+      
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        userMessage = 'CORS Error: You need to deploy the proxy server. See console & README.';
+        console.error('');
+        console.error('🚨 CORS ISSUE DETECTED 🚨');
+        console.error('You need to set the Proxy URL in settings!');
+        console.error('');
+      }
+      
+      showNotification('❌ ' + userMessage);
+      setIsTesting(false);
+    }
+  };
+
+  const generateWithAI = async (item1Name, item2Name) => {
+    if (!apiKey) {
+      showNotification('❌ Please set your OpenAI API key first!');
+      setShowApiKeyInput(true);
+      return null;
+    }
+
+    setIsLoading(true);
+    
+    try {
+      console.log('🔍 Calling AI for:', item1Name, '+', item2Name);
+      
+      let response;
+      
+      if (proxyUrl) {
+        console.log('📡 Using proxy:', proxyUrl);
+        response = await fetch(`${proxyUrl}/api/craft`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            apiKey,
+            item1: item1Name,
+            item2: item2Name
+          })
+        });
+      } else {
+        console.log('📡 Attempting direct OpenAI call...');
+        response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'system',
+                content: 'You are helping create combinations for a crafting game like Infinite Craft. When given two items, respond with a creative but logical result of combining them. Respond ONLY with a JSON object in this exact format: {"name": "ItemName", "emoji": "🎯"}. The name should be a single word or short phrase (2-3 words max), and the emoji should be relevant and fun. Be creative but consistent - the same inputs should logically produce similar outputs.'
+              },
+              {
+                role: 'user',
+                content: `Combine: ${item1Name} + ${item2Name}`
+              }
+            ],
+            temperature: 0.3,
+            max_tokens: 50
+          })
+        });
+      }
+
+      console.log('📡 Response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ API Error Response:', errorText);
+        let errorMessage = 'API call failed';
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error?.message || errorMessage;
+        } catch (e) {
+          errorMessage = errorText;
+        }
+        throw new Error(errorMessage);
+      }
+
+      let result;
+      
+      if (proxyUrl) {
+        result = await response.json();
+      } else {
+        const data = await response.json();
+        console.log('📦 Full API response:', data);
+        
+        const content = data.choices[0].message.content.trim();
+        console.log('💬 AI response content:', content);
+        
+        let jsonStr = content;
+        if (content.includes('```')) {
+          const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+          if (match) {
+            jsonStr = match[1].trim();
+          }
+        }
+        
+        result = JSON.parse(jsonStr);
+      }
+      
+      console.log('✅ Parsed result:', result);
+      
+      if (!result.name || !result.emoji) {
+        throw new Error('Invalid response format - missing name or emoji');
+      }
+      
+      setIsLoading(false);
+      return result;
+    } catch (error) {
+      console.error('💥 AI generation error:', error);
+      
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        showNotification('❌ CORS Error - Set proxy URL in settings');
+        console.error('🚨 You need to set the proxy URL in settings!');
+      } else {
+        showNotification('❌ Error: ' + error.message);
+      }
+      
+      setIsLoading(false);
+      return null;
+    }
+  };
+
+  const createRecipeKey = (name1, name2) => {
+    const sorted = [name1.toLowerCase(), name2.toLowerCase()].sort();
+    return `${sorted[0]}+${sorted[1]}`;
+  };
+
+  const findOrCreateRecipe = async (item1, item2) => {
+    const recipeKey = createRecipeKey(item1.name, item2.name);
+    
+    if (recipeCache[recipeKey]) {
+      return recipeCache[recipeKey];
+    }
+    
+    const aiResult = await generateWithAI(item1.name, item2.name);
+    
+    if (aiResult) {
+      const newCache = {
+        ...recipeCache,
+        [recipeKey]: aiResult
+      };
+      setRecipeCache(newCache);
+      return aiResult;
+    }
+    
+    return null;
+  };
+
+  const showNotification = (message) => {
+    setNotification(message);
+    setTimeout(() => setNotification(''), 3000);
+  };
+
+  const handleDragStart = (e, item, source) => {
+    setDraggedItem({ ...item, source });
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDropOnWorkspace = (e) => {
+    e.preventDefault();
+    if (!draggedItem) return;
+
+    const workspaceRect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - workspaceRect.left;
+    const y = e.clientY - workspaceRect.top;
+
+    if (draggedItem.source === 'workspace') {
+      setWorkspace(prev => prev.map(item => 
+        item.workspaceId === draggedItem.workspaceId
+          ? { ...item, x, y }
+          : item
+      ));
+    } else {
+      const newItem = {
+        ...draggedItem,
+        workspaceId: Date.now() + Math.random(),
+        x,
+        y
+      };
+      setWorkspace(prev => [...prev, newItem]);
+    }
+    
+    setDraggedItem(null);
+  };
+
+  const handleDropOnElement = async (e, targetItem) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!draggedItem || draggedItem.workspaceId === targetItem.workspaceId) {
+      setDraggedItem(null);
+      return;
+    }
+
+    console.log('🔄 Attempting to combine:', draggedItem.name, '+', targetItem.name);
+    
+    const recipe = await findOrCreateRecipe(draggedItem, targetItem);
+    
+    if (recipe && recipe.name && recipe.emoji) {
+      const isNew = !discovered.some(d => d.name.toLowerCase() === recipe.name.toLowerCase());
+      
+      if (isNew) {
+        const newElement = {
+          id: nextId.current++,
+          name: recipe.name,
+          emoji: recipe.emoji
+        };
+        setDiscovered(prev => [...prev, newElement]);
+        showNotification(`✨ NEW! Discovered: ${recipe.emoji} ${recipe.name}`);
+      } else {
+        showNotification(`Created: ${recipe.emoji} ${recipe.name}`);
+      }
+
+      const newItem = {
+        id: nextId.current++,
+        name: recipe.name,
+        emoji: recipe.emoji,
+        workspaceId: Date.now() + Math.random(),
+        x: targetItem.x,
+        y: targetItem.y
+      };
+      
+      setWorkspace(prev => {
+        const filtered = prev.filter(item => 
+          item.workspaceId !== draggedItem.workspaceId && 
+          item.workspaceId !== targetItem.workspaceId
+        );
+        return [...filtered, newItem];
+      });
+    } else {
+      console.error('❌ Recipe generation failed - no valid result');
+      showNotification('❌ Failed to create combination - check console for details');
+    }
+    
+    setDraggedItem(null);
+  };
+
+  const removeFromWorkspace = (workspaceId) => {
+    setWorkspace(workspace.filter(item => item.workspaceId !== workspaceId));
+  };
+
+  const clearWorkspace = () => {
+    setWorkspace([]);
+    showNotification('🧹 Workspace cleared');
+  };
+
+  const resetGame = () => {
+    if (confirm('Are you sure you want to reset all progress? This will delete all discovered items and recipes.')) {
+      setDiscovered([
+        { id: 1, name: 'Water', emoji: '💧' },
+        { id: 2, name: 'Fire', emoji: '🔥' },
+        { id: 3, name: 'Earth', emoji: '🌍' },
+        { id: 4, name: 'Wind', emoji: '💨' }
+      ]);
+      setWorkspace([]);
+      setRecipeCache({});
+      nextId.current = 5;
+      localStorage.removeItem('infinitecraft_discovered');
+      localStorage.removeItem('infinitecraft_recipes');
+      showNotification('🔄 Game reset!');
+    }
+  };
+
+  const downloadProgress = () => {
+    const saveData = {
+      version: 1,
+      discovered,
+      recipeCache,
+      timestamp: new Date().toISOString()
+    };
+    
+    const blob = new Blob([JSON.stringify(saveData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `infinite-craft-save-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showNotification('💾 Progress downloaded!');
+  };
+
+  const uploadProgress = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const saveData = JSON.parse(event.target.result);
+        
+        if (saveData.version !== 1) {
+          showNotification('❌ Invalid save file version');
+          return;
+        }
+        
+        if (saveData.discovered && Array.isArray(saveData.discovered)) {
+          setDiscovered(saveData.discovered);
+          const maxId = Math.max(...saveData.discovered.map(d => d.id), 4);
+          nextId.current = maxId + 1;
+        }
+        
+        if (saveData.recipeCache) {
+          setRecipeCache(saveData.recipeCache);
+        }
+        
+        showNotification('📤 Progress loaded successfully!');
+      } catch (error) {
+        showNotification('❌ Failed to load save file');
+        console.error('Load error:', error);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div className="w-full h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex flex-col">
+      {showApiKeyInput && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <h3 className="text-2xl font-bold mb-4 text-gray-800">Settings</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Configure your OpenAI API key and proxy server. Your settings are stored locally.
+            </p>
+            
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              OpenAI API Key *
+            </label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="sk-..."
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Proxy Server URL (from Railway) *
+            </label>
+            <input
+              type="text"
+              value={proxyUrl}
+              onChange={(e) => setProxyUrl(e.target.value)}
+              placeholder="https://your-app.up.railway.app"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm">
+              <p className="text-yellow-800 font-medium mb-1">⚠️ Both fields required</p>
+              <p className="text-yellow-700">
+                Paste your Railway URL from Step 4 of the setup wizard.
+              </p>
+            </div>
+            
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={testApiKey}
+                disabled={isTesting}
+                className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {isTesting ? 'Testing...' : '🧪 Test'}
+              </button>
+              <button
+                onClick={saveApiKey}
+                className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+              >
+                💾 Save
+              </button>
+            </div>
+            <button
+              onClick={() => setShowApiKeyInput(false)}
+              className="w-full px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+            >
+              Cancel
+            </button>
+            <p className="text-xs text-gray-500 mt-3">
+              Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">platform.openai.com</a>
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white shadow-md p-4">
+        <div className="flex justify-between items-center mb-2">
+          <div>
+            <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
+              Infinite Craft
+            </h1>
+            <p className="text-sm text-gray-600">AI-Powered Element Combining Game</p>
+          </div>
+          <div className="flex gap-2 flex-wrap justify-end">
+            <button
+              onClick={() => setShowApiKeyInput(true)}
+              className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors text-sm"
+              title="Configure Settings"
+            >
+              ⚙️ Settings
+            </button>
+            <label className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors cursor-pointer text-sm">
+              📤 Upload
+              <input
+                type="file"
+                accept=".json"
+                onChange={uploadProgress}
+                className="hidden"
+              />
+            </label>
+            <button
+              onClick={downloadProgress}
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
+            >
+              💾 Download
+            </button>
+            <button
+              onClick={clearWorkspace}
+              className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm"
+            >
+              🧹 Clear
+            </button>
+            <button
+              onClick={resetGame}
+              className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm"
+            >
+              🔄 Reset
+            </button>
+          </div>
+        </div>
+        {(apiKey || proxyUrl) && (
+          <div className="text-xs flex items-center gap-3 px-4">
+            {apiKey && <span className="text-green-600 flex items-center gap-1">✓ API Key</span>}
+            {proxyUrl && <span className="text-green-600 flex items-center gap-1">✓ Proxy: {proxyUrl}</span>}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
+        <div className="w-64 bg-white shadow-lg overflow-y-auto border-r border-gray-200">
+          <div className="p-4 bg-gradient-to-r from-blue-500 to-purple-500 text-white sticky top-0 z-10">
+            <h2 className="text-xl font-bold">Elements</h2>
+            <p className="text-sm opacity-90">{discovered.length} discovered</p>
+          </div>
+          <div className="p-3 space-y-2">
+            {discovered.map((item) => (
+              <div
+                key={item.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, item, 'sidebar')}
+                className="bg-gradient-to-r from-blue-100 to-purple-100 p-3 rounded-lg cursor-move hover:shadow-md transition-all hover:scale-105 active:scale-95"
+              >
+                <span className="text-2xl mr-2">{item.emoji}</span>
+                <span className="font-medium text-gray-800">{item.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div
+          className="flex-1 relative overflow-hidden bg-gradient-to-br from-blue-50 to-purple-50"
+          onDragOver={handleDragOver}
+          onDrop={handleDropOnWorkspace}
+        >
+          {isLoading && (
+            <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center z-40 pointer-events-none">
+              <div className="bg-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                <span className="text-gray-700 font-medium">Creating with AI...</span>
+              </div>
+            </div>
+          )}
+
+          {workspace.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="text-center text-gray-400">
+                <p className="text-6xl mb-4">🎨</p>
+                <p className="text-2xl font-bold mb-2">Drag elements here</p>
+                <p className="text-lg">Drop one onto another to combine!</p>
+              </div>
+            </div>
+          )}
+          
+          {workspace.map((item) => (
+            <div
+              key={item.workspaceId}
+              draggable
+              onDragStart={(e) => handleDragStart(e, item, 'workspace')}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDropOnElement(e, item)}
+              style={{
+                position: 'absolute',
+                left: `${item.x}px`,
+                top: `${item.y}px`,
+                transform: 'translate(-50%, -50%)'
+              }}
+              className="bg-white p-4 rounded-xl shadow-lg cursor-move hover:shadow-2xl transition-all hover:scale-110 active:scale-95 group"
+            >
+              <button
+                onClick={() => removeFromWorkspace(item.workspaceId)}
+                className="absolute -top-2 -right-2 bg-red-500 text-white w-6 h-6 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 flex items-center justify-center text-xs font-bold"
+              >
+                ×
+              </button>
+              <div className="flex flex-col items-center">
+                <span className="text-4xl mb-1">{item.emoji}</span>
+                <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                  {item.name}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {notification && (
+        <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-black text-white px-6 py-3 rounded-full shadow-2xl z-50">
+          {notification}
+        </div>
+      )}
+
+      <div className="bg-white border-t border-gray-200 p-2 text-center text-sm text-gray-600">
+        💡 Set your OpenAI API key & Railway URL in Settings • Drag elements to workspace • Drop onto each other to combine
+      </div>
+    </div>
+  );
+};
+
+ReactDOM.render(<InfiniteCraft />, document.getElementById('root'));
+    </script>
+</body>
+</html>

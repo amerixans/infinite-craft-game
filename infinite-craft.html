@@ -3,13 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Infinite Craft - AI Powered</title>
+    <title>Infinite Craft - Discover the Elements</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        .dark {
+            color-scheme: dark;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .animate-fadeIn {
+            animation: fadeIn 0.3s ease-out;
+        }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slideUp {
+            animation: slideUp 0.4s ease-out;
+        }
+    </style>
 </head>
-<body>
+<body class="transition-colors duration-300">
     <div id="root"></div>
     
     <script type="text/babel">
@@ -27,22 +50,23 @@ const InfiniteCraft = () => {
   const [draggedItem, setDraggedItem] = useState(null);
   const [notification, setNotification] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [proxyUrl, setProxyUrl] = useState('https://infinite-craft-proxy-production.up.railway.app');
+  const [proxyUrl] = useState('https://infinite-craft-proxy-production.up.railway.app');
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
   const nextId = useRef(5);
   
   const [recipeCache, setRecipeCache] = useState({});
 
   useEffect(() => {
     const savedApiKey = localStorage.getItem('infinitecraft_apikey');
-    const savedProxyUrl = localStorage.getItem('infinitecraft_proxyurl');
     const savedDiscovered = localStorage.getItem('infinitecraft_discovered');
     const savedRecipeCache = localStorage.getItem('infinitecraft_recipes');
+    const savedDarkMode = localStorage.getItem('infinitecraft_darkmode');
     
     if (savedApiKey) setApiKey(savedApiKey);
-    if (savedProxyUrl) setProxyUrl(savedProxyUrl);
+    if (savedDarkMode) setDarkMode(savedDarkMode === 'true');
     if (savedDiscovered) {
       try {
         setDiscovered(JSON.parse(savedDiscovered));
@@ -67,11 +91,23 @@ const InfiniteCraft = () => {
     localStorage.setItem('infinitecraft_recipes', JSON.stringify(recipeCache));
   }, [recipeCache]);
 
+  useEffect(() => {
+    localStorage.setItem('infinitecraft_darkmode', darkMode);
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
+  const toggleDarkMode = () => {
+    setDarkMode(!darkMode);
+  };
+
   const saveApiKey = () => {
     localStorage.setItem('infinitecraft_apikey', apiKey);
-    localStorage.setItem('infinitecraft_proxyurl', proxyUrl);
     setShowApiKeyInput(false);
-    showNotification('✅ Settings saved!');
+    showNotification('✅ API Key saved!');
   };
 
   const testApiKey = async () => {
@@ -472,130 +508,167 @@ const InfiniteCraft = () => {
   };
 
   return (
-    <div className="w-full h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex flex-col">
+    <div className={`w-full h-screen flex flex-col transition-colors duration-300 ${darkMode ? 'dark bg-gray-900' : 'bg-gradient-to-br from-blue-50 to-purple-50'}`}>
+      {/* API Key Modal */}
       {showApiKeyInput && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
-            <h3 className="text-2xl font-bold mb-4 text-gray-800">Settings</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Configure your OpenAI API key and proxy server. Your settings are stored locally.
+        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
+          <div className={`rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl animate-slideUp ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+            <h3 className={`text-2xl font-bold mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              API Key Required
+            </h3>
+            <p className={`text-sm mb-6 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              Enter your OpenAI API key to start crafting
             </p>
             
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              OpenAI API Key *
-            </label>
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk-..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={`w-full px-4 py-3 border rounded-xl mb-4 focus:outline-none focus:ring-2 transition-all ${
+                darkMode 
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500' 
+                  : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
+              }`}
             />
             
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Proxy Server URL ✓
-            </label>
-            <input
-              type="text"
-              value={proxyUrl}
-              onChange={(e) => setProxyUrl(e.target.value)}
-              placeholder="https://your-app.up.railway.app"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
-            />
-            
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4 text-sm">
-              <p className="text-green-800 font-medium mb-1">✅ Proxy Pre-Configured</p>
-              <p className="text-green-700">
-                The Railway proxy is already set up. Just enter your OpenAI API key above!
-              </p>
-            </div>
-            
-            <div className="flex gap-2 mb-3">
+            <div className="flex gap-3 mb-4">
               <button
                 onClick={testApiKey}
                 disabled={isTesting}
-                className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${
+                  isTesting 
+                    ? 'bg-gray-400 cursor-not-allowed' 
+                    : darkMode
+                      ? 'bg-green-600 hover:bg-green-700 text-white'
+                      : 'bg-green-500 hover:bg-green-600 text-white shadow-lg shadow-green-500/30 hover:shadow-green-600/40'
+                }`}
               >
                 {isTesting ? 'Testing...' : '🧪 Test'}
               </button>
               <button
                 onClick={saveApiKey}
-                className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${
+                  darkMode
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/30 hover:shadow-blue-600/40'
+                }`}
               >
                 💾 Save
               </button>
             </div>
             <button
               onClick={() => setShowApiKeyInput(false)}
-              className="w-full px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+              className={`w-full px-4 py-3 rounded-xl font-medium transition-all ${
+                darkMode
+                  ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+              }`}
             >
               Cancel
             </button>
-            <p className="text-xs text-gray-500 mt-3">
-              Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">platform.openai.com</a>
+            <p className={`text-xs mt-4 text-center ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+              Get your key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className={`${darkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500 hover:text-blue-600'} transition-colors`}>platform.openai.com</a>
             </p>
           </div>
         </div>
       )}
 
-      <div className="bg-white shadow-md p-4">
-        <div className="flex justify-between items-center mb-2">
-          <div>
-            <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
-              Infinite Craft
-            </h1>
-            <p className="text-sm text-gray-600">AI-Powered Element Combining Game</p>
-          </div>
-          <div className="flex gap-2 flex-wrap justify-end">
-            <button
-              onClick={() => setShowApiKeyInput(true)}
-              className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors text-sm"
-              title="Configure Settings"
-            >
-              ⚙️ Settings
-            </button>
-            <label className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors cursor-pointer text-sm">
-              📤 Upload
-              <input
-                type="file"
-                accept=".json"
-                onChange={uploadProgress}
-                className="hidden"
-              />
-            </label>
-            <button
-              onClick={downloadProgress}
-              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
-            >
-              💾 Download
-            </button>
-            <button
-              onClick={clearWorkspace}
-              className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm"
-            >
-              🧹 Clear
-            </button>
-            <button
-              onClick={resetGame}
-              className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm"
-            >
-              🔄 Reset
-            </button>
+      {/* Header */}
+      <div className={`shadow-lg transition-colors duration-300 ${darkMode ? 'bg-gray-800 shadow-gray-900/50' : 'bg-white'}`}>
+        <div className="p-4 md:p-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className={`text-3xl md:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r ${
+                darkMode ? 'from-blue-400 to-purple-400' : 'from-blue-600 to-purple-600'
+              }`}>
+                Infinite Craft
+              </h1>
+              <p className={`text-sm md:text-base mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                Discover endless combinations
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap justify-end">
+              <button
+                onClick={toggleDarkMode}
+                className={`p-3 rounded-xl transition-all ${
+                  darkMode
+                    ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                }`}
+                title="Toggle Dark Mode"
+              >
+                {darkMode ? '☀️' : '🌙'}
+              </button>
+              <button
+                onClick={() => setShowApiKeyInput(true)}
+                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                  darkMode
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                    : 'bg-purple-500 hover:bg-purple-600 text-white shadow-lg shadow-purple-500/30'
+                }`}
+              >
+                🔑 API Key
+              </button>
+              <label className={`px-4 py-3 rounded-xl font-medium cursor-pointer transition-all ${
+                darkMode
+                  ? 'bg-green-600 hover:bg-green-700 text-white'
+                  : 'bg-green-500 hover:bg-green-600 text-white shadow-lg shadow-green-500/30'
+              }`}>
+                📤 Load
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={uploadProgress}
+                  className="hidden"
+                />
+              </label>
+              <button
+                onClick={downloadProgress}
+                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                  darkMode
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                }`}
+              >
+                💾 Save
+              </button>
+              <button
+                onClick={clearWorkspace}
+                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                  darkMode
+                    ? 'bg-orange-600 hover:bg-orange-700 text-white'
+                    : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/30'
+                }`}
+              >
+                🧹
+              </button>
+              <button
+                onClick={resetGame}
+                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                  darkMode
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/30'
+                }`}
+              >
+                🔄
+              </button>
+            </div>
           </div>
         </div>
-        {(apiKey || proxyUrl) && (
-          <div className="text-xs flex items-center gap-3 px-4">
-            {apiKey && <span className="text-green-600 flex items-center gap-1">✓ API Key</span>}
-            {proxyUrl && <span className="text-green-600 flex items-center gap-1">✓ Proxy: {proxyUrl}</span>}
-          </div>
-        )}
       </div>
 
+      {/* Main Content */}
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-64 bg-white shadow-lg overflow-y-auto border-r border-gray-200">
-          <div className="p-4 bg-gradient-to-r from-blue-500 to-purple-500 text-white sticky top-0 z-10">
-            <h2 className="text-xl font-bold">Elements</h2>
-            <p className="text-sm opacity-90">{discovered.length} discovered</p>
+        {/* Sidebar - Discovered Elements */}
+        <div className={`w-64 shadow-2xl overflow-y-auto border-r transition-colors duration-300 ${
+          darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+        }`}>
+          <div className={`p-4 sticky top-0 z-10 transition-colors duration-300 ${
+            darkMode ? 'bg-gradient-to-r from-blue-600 to-purple-600' : 'bg-gradient-to-r from-blue-500 to-purple-500'
+          }`}>
+            <h2 className="text-xl font-bold text-white">Elements</h2>
+            <p className="text-sm text-blue-100">{discovered.length} discovered</p>
           </div>
           <div className="p-3 space-y-2">
             {discovered.map((item) => (
@@ -603,35 +676,53 @@ const InfiniteCraft = () => {
                 key={item.id}
                 draggable
                 onDragStart={(e) => handleDragStart(e, item, 'sidebar')}
-                className="bg-gradient-to-r from-blue-100 to-purple-100 p-3 rounded-lg cursor-move hover:shadow-md transition-all hover:scale-105 active:scale-95"
+                className={`p-3 rounded-xl cursor-move transition-all hover:scale-105 active:scale-95 ${
+                  darkMode
+                    ? 'bg-gradient-to-r from-gray-700 to-gray-600 hover:shadow-lg hover:shadow-purple-500/20'
+                    : 'bg-gradient-to-r from-blue-100 to-purple-100 hover:shadow-lg hover:shadow-purple-500/30'
+                }`}
               >
                 <span className="text-2xl mr-2">{item.emoji}</span>
-                <span className="font-medium text-gray-800">{item.name}</span>
+                <span className={`font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
+                  {item.name}
+                </span>
               </div>
             ))}
           </div>
         </div>
 
+        {/* Workspace */}
         <div
-          className="flex-1 relative overflow-hidden bg-gradient-to-br from-blue-50 to-purple-50"
+          className={`flex-1 relative overflow-hidden transition-colors duration-300 ${
+            darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-blue-50 to-purple-50'
+          }`}
           onDragOver={handleDragOver}
           onDrop={handleDropOnWorkspace}
         >
+          {/* Loading Overlay */}
           {isLoading && (
-            <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center z-40 pointer-events-none">
-              <div className="bg-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                <span className="text-gray-700 font-medium">Creating with AI...</span>
+            <div className="absolute inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-40 animate-fadeIn">
+              <div className={`px-8 py-5 rounded-2xl shadow-2xl flex items-center gap-4 ${
+                darkMode ? 'bg-gray-800' : 'bg-white'
+              }`}>
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className={`font-semibold text-lg ${darkMode ? 'text-gray-100' : 'text-gray-700'}`}>
+                  Crafting...
+                </span>
               </div>
             </div>
           )}
 
           {workspace.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center text-gray-400">
-                <p className="text-6xl mb-4">🎨</p>
-                <p className="text-2xl font-bold mb-2">Drag elements here</p>
-                <p className="text-lg">Drop one onto another to combine!</p>
+              <div className="text-center">
+                <p className="text-7xl mb-4 animate-pulse">🎨</p>
+                <p className={`text-2xl font-bold mb-2 ${darkMode ? 'text-gray-400' : 'text-gray-400'}`}>
+                  Drag elements here
+                </p>
+                <p className={`text-lg ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                  Drop one onto another to combine
+                </p>
               </div>
             </div>
           )}
@@ -649,17 +740,27 @@ const InfiniteCraft = () => {
                 top: `${item.y}px`,
                 transform: 'translate(-50%, -50%)'
               }}
-              className="bg-white p-4 rounded-xl shadow-lg cursor-move hover:shadow-2xl transition-all hover:scale-110 active:scale-95 group"
+              className={`p-5 rounded-2xl cursor-move transition-all hover:scale-110 active:scale-95 group shadow-xl ${
+                darkMode
+                  ? 'bg-gray-800 hover:shadow-2xl hover:shadow-purple-500/30'
+                  : 'bg-white hover:shadow-2xl hover:shadow-purple-500/40'
+              }`}
             >
               <button
                 onClick={() => removeFromWorkspace(item.workspaceId)}
-                className="absolute -top-2 -right-2 bg-red-500 text-white w-6 h-6 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 flex items-center justify-center text-xs font-bold"
+                className={`absolute -top-2 -right-2 w-7 h-7 rounded-full opacity-0 group-hover:opacity-100 transition-all font-bold shadow-lg ${
+                  darkMode
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-red-500 hover:bg-red-600 text-white'
+                }`}
               >
                 ×
               </button>
               <div className="flex flex-col items-center">
-                <span className="text-4xl mb-1">{item.emoji}</span>
-                <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                <span className="text-5xl mb-2">{item.emoji}</span>
+                <span className={`text-sm font-semibold whitespace-nowrap ${
+                  darkMode ? 'text-gray-100' : 'text-gray-700'
+                }`}>
                   {item.name}
                 </span>
               </div>
@@ -668,15 +769,14 @@ const InfiniteCraft = () => {
         </div>
       </div>
 
+      {/* Notification */}
       {notification && (
-        <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-black text-white px-6 py-3 rounded-full shadow-2xl z-50">
+        <div className={`fixed top-24 left-1/2 transform -translate-x-1/2 px-8 py-4 rounded-full shadow-2xl z-50 animate-fadeIn font-medium ${
+          darkMode ? 'bg-gray-800 text-white' : 'bg-black text-white'
+        }`}>
           {notification}
         </div>
       )}
-
-      <div className="bg-white border-t border-gray-200 p-2 text-center text-sm text-gray-600">
-        💡 Set your OpenAI API key & Railway URL in Settings • Drag elements to workspace • Drop onto each other to combine
-      </div>
     </div>
   );
 };

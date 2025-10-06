@@ -40,10 +40,10 @@ const { useState, useRef, useEffect } = React;
 
 const InfiniteCraft = () => {
   const [discovered, setDiscovered] = useState([
-    { id: 1, name: 'Water', emoji: '💧' },
-    { id: 2, name: 'Fire', emoji: '🔥' },
-    { id: 3, name: 'Earth', emoji: '🌍' },
-    { id: 4, name: 'Wind', emoji: '💨' }
+    { id: 1, name: 'Water', emoji: '💧', discoveryCount: 0, recipe: null },
+    { id: 2, name: 'Fire', emoji: '🔥', discoveryCount: 0, recipe: null },
+    { id: 3, name: 'Earth', emoji: '🌍', discoveryCount: 0, recipe: null },
+    { id: 4, name: 'Wind', emoji: '💨', discoveryCount: 0, recipe: null }
   ]);
   
   const [workspace, setWorkspace] = useState([]);
@@ -52,9 +52,12 @@ const InfiniteCraft = () => {
   const [apiKey, setApiKey] = useState('');
   const [proxyUrl] = useState('https://infinite-craft-proxy-production.up.railway.app');
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [showLookup, setShowLookup] = useState(false);
+  const [lookupSearch, setLookupSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [loadingItems, setLoadingItems] = useState(new Set());
   const nextId = useRef(5);
   
   const [recipeCache, setRecipeCache] = useState({});
@@ -200,8 +203,6 @@ const InfiniteCraft = () => {
       setShowApiKeyInput(true);
       return null;
     }
-
-    setIsLoading(true);
     
     try {
       console.log('🔍 Calling AI for:', item1Name, '+', item2Name);
@@ -240,7 +241,6 @@ const InfiniteCraft = () => {
         throw new Error('Invalid response format - missing name or emoji');
       }
       
-      setIsLoading(false);
       return result;
     } catch (error) {
       console.error('💥 AI generation error:', error);
@@ -252,9 +252,35 @@ const InfiniteCraft = () => {
         showNotification('❌ Error: ' + error.message);
       }
       
-      setIsLoading(false);
       return null;
     }
+  };
+
+  const trackDiscovery = async (itemName) => {
+    try {
+      await fetch(`${proxyUrl}/api/track-discovery`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ item: itemName })
+      });
+    } catch (error) {
+      console.error('Failed to track discovery:', error);
+    }
+  };
+
+  const getDiscoveryCount = async (itemName) => {
+    try {
+      const response = await fetch(`${proxyUrl}/api/discovery-count/${encodeURIComponent(itemName)}`);
+      if (response.ok) {
+        const data = await response.json();
+        return data.count || 0;
+      }
+    } catch (error) {
+      console.error('Failed to get discovery count:', error);
+    }
+    return 0;
   };
 
   const createRecipeKey = (name1, name2) => {
@@ -291,6 +317,100 @@ const InfiniteCraft = () => {
   const handleDragStart = (e, item, source) => {
     setDraggedItem({ ...item, source });
     e.dataTransfer.effectAllowed = 'copy';
+    // Fix drag image visibility
+    if (e.dataTransfer.setDragImage) {
+      const dragImage = e.target.cloneNode(true);
+      dragImage.style.opacity = '0.8';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, dragImage.offsetWidth / 2, dragImage.offsetHeight / 2);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  // Touch event handlers for mobile
+  const handleTouchStart = (e, item, source) => {
+    e.preventDefault();
+    setDraggedItem({ ...item, source });
+    
+    const touch = e.touches[0];
+    const element = e.currentTarget;
+    
+    // Create a floating copy
+    const clone = element.cloneNode(true);
+    clone.style.position = 'fixed';
+    clone.style.pointerEvents = 'none';
+    clone.style.opacity = '0.8';
+    clone.style.zIndex = '10000';
+    clone.id = 'touch-drag-clone';
+    clone.style.left = `${touch.clientX - element.offsetWidth / 2}px`;
+    clone.style.top = `${touch.clientY - element.offsetHeight / 2}px`;
+    document.body.appendChild(clone);
+  };
+
+  const handleTouchMove = (e) => {
+    if (!draggedItem) return;
+    e.preventDefault();
+    
+    const touch = e.touches[0];
+    const clone = document.getElementById('touch-drag-clone');
+    if (clone) {
+      clone.style.left = `${touch.clientX - clone.offsetWidth / 2}px`;
+      clone.style.top = `${touch.clientY - clone.offsetHeight / 2}px`;
+    }
+  };
+
+  const handleTouchEnd = async (e) => {
+    if (!draggedItem) return;
+    e.preventDefault();
+    
+    const clone = document.getElementById('touch-drag-clone');
+    if (clone) {
+      document.body.removeChild(clone);
+    }
+    
+    const touch = e.changedTouches[0];
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+    
+    if (element) {
+      // Check if dropped on workspace
+      const workspace = document.querySelector('[data-workspace="true"]');
+      if (workspace && workspace.contains(element)) {
+        const workspaceRect = workspace.getBoundingClientRect();
+        const x = touch.clientX - workspaceRect.left;
+        const y = touch.clientY - workspaceRect.top;
+        
+        // Check if dropped on an item
+        const workspaceItem = element.closest('[data-workspace-item]');
+        if (workspaceItem) {
+          const targetId = workspaceItem.dataset.workspaceItem;
+          const targetItem = workspace.find(item => item.workspaceId == targetId);
+          if (targetItem) {
+            await handleDropOnElement({ preventDefault: () => {}, stopPropagation: () => {} }, targetItem);
+            setDraggedItem(null);
+            return;
+          }
+        }
+        
+        // Dropped on empty workspace
+        if (draggedItem.source === 'workspace') {
+          setWorkspace(prev => prev.map(item => 
+            item.workspaceId === draggedItem.workspaceId
+              ? { ...item, x, y }
+              : item
+          ));
+        } else {
+          const newItem = {
+            ...draggedItem,
+            workspaceId: Date.now() + Math.random(),
+            x,
+            y
+          };
+          setWorkspace(prev => [...prev, newItem]);
+        }
+      }
+    }
+    
+    setDraggedItem(null);
   };
 
   const handleDragOver = (e) => {
@@ -336,20 +456,43 @@ const InfiniteCraft = () => {
 
     console.log('🔄 Attempting to combine:', draggedItem.name, '+', targetItem.name);
     
+    // Add loading state to target item
+    setLoadingItems(prev => new Set([...prev, targetItem.workspaceId]));
+    
     const recipe = await findOrCreateRecipe(draggedItem, targetItem);
+    
+    // Remove loading state
+    setLoadingItems(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(targetItem.workspaceId);
+      return newSet;
+    });
     
     if (recipe && recipe.name && recipe.emoji) {
       const isNew = !discovered.some(d => d.name.toLowerCase() === recipe.name.toLowerCase());
       
       if (isNew) {
+        // Track discovery and get count
+        trackDiscovery(recipe.name);
+        const count = await getDiscoveryCount(recipe.name);
+        
         const newElement = {
           id: nextId.current++,
           name: recipe.name,
-          emoji: recipe.emoji
+          emoji: recipe.emoji,
+          discoveryCount: count,
+          recipe: { item1: draggedItem.name, item2: targetItem.name }
         };
         setDiscovered(prev => [...prev, newElement]);
         showNotification(`✨ NEW! Discovered: ${recipe.emoji} ${recipe.name}`);
       } else {
+        // Update discovery count for existing item
+        const count = await getDiscoveryCount(recipe.name);
+        setDiscovered(prev => prev.map(item => 
+          item.name.toLowerCase() === recipe.name.toLowerCase()
+            ? { ...item, discoveryCount: count }
+            : item
+        ));
         showNotification(`Created: ${recipe.emoji} ${recipe.name}`);
       }
 
@@ -389,10 +532,10 @@ const InfiniteCraft = () => {
   const resetGame = () => {
     if (confirm('Are you sure you want to reset all progress? This will delete all discovered items and recipes.')) {
       setDiscovered([
-        { id: 1, name: 'Water', emoji: '💧' },
-        { id: 2, name: 'Fire', emoji: '🔥' },
-        { id: 3, name: 'Earth', emoji: '🌍' },
-        { id: 4, name: 'Wind', emoji: '💨' }
+        { id: 1, name: 'Water', emoji: '💧', discoveryCount: 0, recipe: null },
+        { id: 2, name: 'Fire', emoji: '🔥', discoveryCount: 0, recipe: null },
+        { id: 3, name: 'Earth', emoji: '🌍', discoveryCount: 0, recipe: null },
+        { id: 4, name: 'Wind', emoji: '💨', discoveryCount: 0, recipe: null }
       ]);
       setWorkspace([]);
       setRecipeCache({});
@@ -402,6 +545,10 @@ const InfiniteCraft = () => {
       showNotification('🔄 Game reset!');
     }
   };
+
+  const filteredDiscoveries = discovered.filter(item =>
+    item.name.toLowerCase().includes(lookupSearch.toLowerCase())
+  );
 
   const downloadProgress = () => {
     const saveData = {
@@ -524,6 +671,89 @@ const InfiniteCraft = () => {
         </div>
       )}
 
+      {/* Lookup Modal */}
+      {showLookup && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
+          <div className={`rounded-2xl p-8 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto shadow-2xl animate-slideUp ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                🔍 Recipe Lookup
+              </h3>
+              <button
+                onClick={() => setShowLookup(false)}
+                className={`px-4 py-2 rounded-xl font-medium transition-all ${
+                  darkMode
+                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                }`}
+              >
+                Close
+              </button>
+            </div>
+            
+            <input
+              type="text"
+              value={lookupSearch}
+              onChange={(e) => setLookupSearch(e.target.value)}
+              placeholder="Search for an element..."
+              className={`w-full px-4 py-3 border rounded-xl mb-6 focus:outline-none focus:ring-2 transition-all ${
+                darkMode 
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500' 
+                  : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
+              }`}
+            />
+            
+            <div className="space-y-3">
+              {filteredDiscoveries.map((item) => (
+                <div
+                  key={item.id}
+                  className={`p-4 rounded-xl ${
+                    darkMode
+                      ? 'bg-gray-700'
+                      : 'bg-gradient-to-r from-blue-50 to-purple-50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-3xl">{item.emoji}</span>
+                      <div>
+                        <p className={`font-bold text-lg ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                          {item.name}
+                        </p>
+                        {item.recipe ? (
+                          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                            {item.recipe.item1} + {item.recipe.item2}
+                          </p>
+                        ) : (
+                          <p className={`text-sm ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                            Starting element
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {item.discoveryCount > 0 && (
+                      <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        darkMode
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-purple-500 text-white'
+                      }`}>
+                        {item.discoveryCount} {item.discoveryCount === 1 ? 'discovery' : 'discoveries'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              
+              {filteredDiscoveries.length === 0 && (
+                <p className={`text-center py-8 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  No elements found
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className={`shadow-lg transition-colors duration-300 ${darkMode ? 'bg-gray-800 shadow-gray-900/50' : 'bg-white'}`}>
         <div className="p-4 md:p-6">
@@ -549,6 +779,16 @@ const InfiniteCraft = () => {
                 title="Toggle Dark Mode"
               >
                 {darkMode ? '☀️' : '🌙'}
+              </button>
+              <button
+                onClick={() => setShowLookup(true)}
+                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                  darkMode
+                    ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                    : 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
+                }`}
+              >
+                🔍 Lookup
               </button>
               <button
                 onClick={() => setShowApiKeyInput(true)}
@@ -626,16 +866,32 @@ const InfiniteCraft = () => {
                 key={item.id}
                 draggable
                 onDragStart={(e) => handleDragStart(e, item, 'sidebar')}
+                onTouchStart={(e) => handleTouchStart(e, item, 'sidebar')}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
                 className={`p-3 rounded-xl cursor-move transition-all hover:scale-105 active:scale-95 ${
                   darkMode
                     ? 'bg-gradient-to-r from-gray-700 to-gray-600 hover:shadow-lg hover:shadow-purple-500/20'
                     : 'bg-gradient-to-r from-blue-100 to-purple-100 hover:shadow-lg hover:shadow-purple-500/30'
                 }`}
               >
-                <span className="text-2xl mr-2">{item.emoji}</span>
-                <span className={`font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-                  {item.name}
-                </span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <span className="text-2xl mr-2">{item.emoji}</span>
+                    <span className={`font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
+                      {item.name}
+                    </span>
+                  </div>
+                  {item.discoveryCount > 0 && (
+                    <span className={`text-xs px-2 py-1 rounded-full font-bold ${
+                      darkMode
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-purple-500 text-white'
+                    }`}>
+                      {item.discoveryCount}
+                    </span>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -643,26 +899,15 @@ const InfiniteCraft = () => {
 
         {/* Workspace */}
         <div
+          data-workspace="true"
           className={`flex-1 relative overflow-hidden transition-colors duration-300 ${
             darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-blue-50 to-purple-50'
           }`}
           onDragOver={handleDragOver}
           onDrop={handleDropOnWorkspace}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
         >
-          {/* Loading Overlay */}
-          {isLoading && (
-            <div className="absolute inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-40 animate-fadeIn">
-              <div className={`px-8 py-5 rounded-2xl shadow-2xl flex items-center gap-4 ${
-                darkMode ? 'bg-gray-800' : 'bg-white'
-              }`}>
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                <span className={`font-semibold text-lg ${darkMode ? 'text-gray-100' : 'text-gray-700'}`}>
-                  Crafting...
-                </span>
-              </div>
-            </div>
-          )}
-
           {workspace.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center">
@@ -677,45 +922,60 @@ const InfiniteCraft = () => {
             </div>
           )}
           
-          {workspace.map((item) => (
-            <div
-              key={item.workspaceId}
-              draggable
-              onDragStart={(e) => handleDragStart(e, item, 'workspace')}
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDropOnElement(e, item)}
-              style={{
-                position: 'absolute',
-                left: `${item.x}px`,
-                top: `${item.y}px`,
-                transform: 'translate(-50%, -50%)'
-              }}
-              className={`p-5 rounded-2xl cursor-move transition-all hover:scale-110 active:scale-95 group shadow-xl ${
-                darkMode
-                  ? 'bg-gray-800 hover:shadow-2xl hover:shadow-purple-500/30'
-                  : 'bg-white hover:shadow-2xl hover:shadow-purple-500/40'
-              }`}
-            >
-              <button
-                onClick={() => removeFromWorkspace(item.workspaceId)}
-                className={`absolute -top-2 -right-2 w-7 h-7 rounded-full opacity-0 group-hover:opacity-100 transition-all font-bold shadow-lg ${
+          {workspace.map((item) => {
+            const isLoadingThis = loadingItems.has(item.workspaceId);
+            
+            return (
+              <div
+                key={item.workspaceId}
+                data-workspace-item={item.workspaceId}
+                draggable={!isLoadingThis}
+                onDragStart={(e) => !isLoadingThis && handleDragStart(e, item, 'workspace')}
+                onDragOver={handleDragOver}
+                onDrop={(e) => !isLoadingThis && handleDropOnElement(e, item)}
+                onTouchStart={(e) => !isLoadingThis && handleTouchStart(e, item, 'workspace')}
+                style={{
+                  position: 'absolute',
+                  left: `${item.x}px`,
+                  top: `${item.y}px`,
+                  transform: 'translate(-50%, -50%)'
+                }}
+                className={`p-5 rounded-2xl transition-all group shadow-xl ${
+                  isLoadingThis 
+                    ? 'cursor-wait opacity-75' 
+                    : 'cursor-move hover:scale-110 active:scale-95'
+                } ${
                   darkMode
-                    ? 'bg-red-600 hover:bg-red-700 text-white'
-                    : 'bg-red-500 hover:bg-red-600 text-white'
+                    ? 'bg-gray-800 hover:shadow-2xl hover:shadow-purple-500/30'
+                    : 'bg-white hover:shadow-2xl hover:shadow-purple-500/40'
                 }`}
               >
-                ×
-              </button>
-              <div className="flex flex-col items-center">
-                <span className="text-5xl mb-2">{item.emoji}</span>
-                <span className={`text-sm font-semibold whitespace-nowrap ${
-                  darkMode ? 'text-gray-100' : 'text-gray-700'
-                }`}>
-                  {item.name}
-                </span>
+                {isLoadingThis && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-40 rounded-2xl backdrop-blur-sm">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                  </div>
+                )}
+                <button
+                  onClick={() => removeFromWorkspace(item.workspaceId)}
+                  className={`absolute -top-2 -right-2 w-7 h-7 rounded-full opacity-0 group-hover:opacity-100 transition-all font-bold shadow-lg ${
+                    darkMode
+                      ? 'bg-red-600 hover:bg-red-700 text-white'
+                      : 'bg-red-500 hover:bg-red-600 text-white'
+                  }`}
+                >
+                  ×
+                </button>
+                <div className="flex flex-col items-center">
+                  <span className="text-5xl mb-2">{item.emoji}</span>
+                  <span className={`text-sm font-semibold whitespace-nowrap ${
+                    darkMode ? 'text-gray-100' : 'text-gray-700'
+                  }`}>
+                    {item.name}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

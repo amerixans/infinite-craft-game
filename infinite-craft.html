@@ -206,46 +206,17 @@ const InfiniteCraft = () => {
     try {
       console.log('🔍 Calling AI for:', item1Name, '+', item2Name);
       
-      let response;
-      
-      if (proxyUrl) {
-        console.log('📡 Using proxy:', proxyUrl);
-        response = await fetch(`${proxyUrl}/api/craft`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            apiKey,
-            item1: item1Name,
-            item2: item2Name
-          })
-        });
-      } else {
-        console.log('📡 Attempting direct OpenAI call...');
-        response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'system',
-                content: 'You are helping create combinations for a crafting game like Infinite Craft. When given two items, respond with a creative but logical result of combining them. Respond ONLY with a JSON object in this exact format: {"name": "ItemName", "emoji": "🎯"}. The name should be a single word or short phrase (2-3 words max), and the emoji should be relevant and fun. Be creative but consistent - the same inputs should logically produce similar outputs.'
-              },
-              {
-                role: 'user',
-                content: `Combine: ${item1Name} + ${item2Name}`
-              }
-            ],
-            temperature: 0.3,
-            max_tokens: 50
-          })
-        });
-      }
+      const response = await fetch(`${proxyUrl}/api/craft`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          apiKey,
+          item1: item1Name,
+          item2: item2Name
+        })
+      });
 
       console.log('📡 Response status:', response.status);
 
@@ -262,28 +233,7 @@ const InfiniteCraft = () => {
         throw new Error(errorMessage);
       }
 
-      let result;
-      
-      if (proxyUrl) {
-        result = await response.json();
-      } else {
-        const data = await response.json();
-        console.log('📦 Full API response:', data);
-        
-        const content = data.choices[0].message.content.trim();
-        console.log('💬 AI response content:', content);
-        
-        let jsonStr = content;
-        if (content.includes('```')) {
-          const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-          if (match) {
-            jsonStr = match[1].trim();
-          }
-        }
-        
-        result = JSON.parse(jsonStr);
-      }
-      
+      const result = await response.json();
       console.log('✅ Parsed result:', result);
       
       if (!result.name || !result.emoji) {
